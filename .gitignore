@@ -1,0 +1,13 @@
+node_modules
+dist
+.env*
+!.env.example
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
+backend/drizzle/
+backend/.cache
+.vite
+.vscode/
+.idea/

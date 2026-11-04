@@ -1,0 +1,47 @@
+services:
+  db:
+    image: postgres:17-alpine
+    container_name: myref-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-myref}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-myref}
+      POSTGRES_DB: ${POSTGRES_DB:-myref}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - myref_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-myref} -d ${POSTGRES_DB:-myref}",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: myref-backend
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-myref}:${POSTGRES_PASSWORD:-myref}@db:5432/${POSTGRES_DB:-myref}
+      PORT: "3000"
+      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:${PORT:-3000}}
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').then((r) => { if (!r.ok) process.exit(1) })"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+volumes:
+  myref_pgdata:

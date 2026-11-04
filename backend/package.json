@@ -1,0 +1,36 @@
+{
+  "name": "@myref/backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "cli": "bun src/cli.ts",
+    "db:push": "drizzle-kit push",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:studio": "drizzle-kit studio",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@elysiajs/cors": "latest",
+    "@elysiajs/static": "latest",
+    "citeproc": "^2.4.63",
+    "dotenv": "latest",
+    "drizzle-orm": "latest",
+    "elysia": "latest",
+    "he": "^2.0.0",
+    "postgres": "latest",
+    "sanitize-filename": "^1.6.4",
+    "uuid": "^14.0.3"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/he": "^1.2.3",
+    "@types/sanitize-filename": "^1.6.3",
+    "@types/uuid": "^11.0.0",
+    "drizzle-kit": "latest",
+    "typescript": "latest"
+  }
+}
