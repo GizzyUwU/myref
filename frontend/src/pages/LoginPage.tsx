@@ -14,7 +14,7 @@ export function LoginPage() {
       return { registrationEnabled: true };
     }
   });
-  const [identifier, setIdentifier] = createSignal("");
+  const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
   const [error, setError] = createSignal("");
   const [busy, setBusy] = createSignal(false);
@@ -25,7 +25,7 @@ export function LoginPage() {
     setError("");
 
     try {
-      await auth.login(identifier(), password());
+      await auth.login(username(), password());
       navigate("/app");
     } catch (caught) {
       setError(
@@ -43,11 +43,11 @@ export function LoginPage() {
         subtitle="Sign in to pick up your references where you left off."
       >
         <form onSubmit={submit} class="auth-form">
-          <Field label="Email or username">
+          <Field label="Username">
             <input
-              value={identifier()}
-              onInput={(event) => setIdentifier(event.currentTarget.value)}
-              placeholder="you@example.com"
+              value={username()}
+              onInput={(event) => setUsername(event.currentTarget.value)}
+              placeholder="yourname"
               autocomplete="username"
               autofocus
               required

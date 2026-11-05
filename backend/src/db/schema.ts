@@ -33,7 +33,6 @@ export const users = pgTable(
   "users",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    email: text("email").notNull(),
     username: text("username").notNull(),
     passwordHash: text("password_hash").notNull(),
     createdAt: timestamp("created_at", { withTimezone: true })
@@ -41,7 +40,6 @@ export const users = pgTable(
       .defaultNow(),
   },
   (table) => [
-    uniqueIndex("users_email_lower_unique").on(sql`lower(${table.email})`),
     uniqueIndex("users_username_lower_unique").on(
       sql`lower(${table.username})`,
     ),

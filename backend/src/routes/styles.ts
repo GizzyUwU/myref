@@ -6,14 +6,18 @@ export const styleRoutes = new Elysia({ prefix: "/styles" }).get(
   "/",
   async ({ query, cookie }) => {
     await requireUser(cookie);
-    const limit = Number.parseInt(query.limit ?? "30", 10);
-    const styles = await searchCslStyles(query.q ?? "", limit);
+    const styles = await searchCslStyles(
+      query.q ?? "",
+      query.limit === undefined
+        ? undefined
+        : Number.parseInt(query.limit, 10),
+    );
     return { styles };
   },
   {
     query: t.Object({
       q: t.Optional(t.String({ maxLength: 200 })),
-      limit: t.Optional(t.String({ maxLength: 3 })),
+      limit: t.Optional(t.String({ maxLength: 5 })),
     }),
   },
 );

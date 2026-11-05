@@ -247,11 +247,16 @@ function styleSummary(style: CatalogStyle): CslStyleSummary {
 
 export async function searchCslStyles(
   query: string,
-  limit = 30,
+  limit?: number,
 ): Promise<CslStyleSummary[]> {
   const catalog = await loadCatalog();
   const term = query.trim().toLowerCase();
-  const safeLimit = Math.min(Math.max(Math.trunc(limit) || 30, 1), 100);
+  // No explicit cap by default: callers virtualize the list. An explicit
+  // limit is still honored (clamped) for anyone wanting a short list.
+  const maxResults =
+    limit === undefined
+      ? Number.POSITIVE_INFINITY
+      : Math.min(Math.max(Math.trunc(limit) || 30, 1), 20000);
 
   let matches: CatalogStyle[];
   if (term) {
@@ -279,18 +284,24 @@ export async function searchCslStyles(
       );
     });
   } else {
+    // No query: the whole catalog, featured styles first so the common
+    // choices stay at the top, then alphabetical by title.
     const featured = new Map(
       featuredStyles.map((id, index) => [id, index]),
     );
-    matches = catalog
+    const featuredMatches = catalog
       .filter((style) => featured.has(style.name))
       .sort(
         (a, b) =>
           (featured.get(a.name) ?? 999) - (featured.get(b.name) ?? 999),
       );
+    const rest = catalog
+      .filter((style) => !featured.has(style.name))
+      .sort((a, b) => a.title.localeCompare(b.title));
+    matches = [...featuredMatches, ...rest];
   }
 
-  return matches.slice(0, safeLimit).map(styleSummary);
+  return matches.slice(0, maxResults).map(styleSummary);
 }
 
 async function loadLocale(locale: string): Promise<string> {

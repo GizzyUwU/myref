@@ -4,10 +4,12 @@ import { db } from "../db";
 import { env } from "../env";
 import { projects, users } from "../db/schema";
 import { badRequest, HttpError } from "../lib/http";
-import { hashPassword, verifyPassword } from "../lib/password";
+import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from "../lib/password";
+import { checkRateLimit, clientIp } from "../lib/rate-limit";
 import {
   clearSessionCookie,
   createSession,
+  destroyOtherSessions,
   destroySession,
   getSessionUser,
   publicUser,
@@ -46,17 +48,25 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   }))
   .post(
     "/register",
-    async ({ body, cookie }) => {
+    async ({ body, cookie, request, server, set }) => {
       if (!env.registrationEnabled) {
         throw new HttpError(403, "Registration is disabled.");
       }
-      const email = body.email.trim().toLowerCase();
+
+      const limit = checkRateLimit(
+        `register:${clientIp(request, server, env.trustProxy)}`,
+        10,
+        60 * 60 * 1000,
+      );
+      if (!limit.allowed) {
+        set.status = 429;
+        set.headers["retry-after"] = String(limit.retryAfter);
+        return { error: "Too many attempts. Try again later." };
+      }
+
       const username = body.username.trim();
       const password = body.password;
 
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        badRequest("Enter a valid email address.");
-      }
       assertValidUsername(username);
       if (password.length < 8) {
         badRequest("Password must be at least 8 characters.");
@@ -66,21 +76,13 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       }
 
       const existing = await db
-        .select({ email: users.email, username: users.username })
+        .select({ username: users.username })
         .from(users)
-        .where(
-          sql`lower(${users.email}) = ${email} or lower(${users.username}) = ${username.toLowerCase()}`,
-        )
+        .where(sql`lower(${users.username}) = ${username.toLowerCase()}`)
         .limit(1);
 
       if (existing.length > 0) {
-        const match = existing[0]!;
-        throw new HttpError(
-          409,
-          match.email.toLowerCase() === email
-            ? "That email is already registered."
-            : "That username is already taken.",
-        );
+        throw new HttpError(409, "That username is already taken.");
       }
 
       const passwordHash = await hashPassword(password);
@@ -90,7 +92,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         created = await db.transaction(async (tx) => {
           const [user] = await tx
             .insert(users)
-            .values({ email, username, passwordHash })
+            .values({ username, passwordHash })
             .returning();
 
           if (!user) throw new HttpError(500, "Could not create account.");
@@ -105,7 +107,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         });
       } catch (error) {
         if (isUniqueViolation(error)) {
-          throw new HttpError(409, "That email or username is already taken.");
+          throw new HttpError(409, "That username is already taken.");
         }
         throw error;
       }
@@ -117,7 +119,6 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     },
     {
       body: t.Object({
-        email: t.String({ maxLength: 320 }),
         username: t.String({ maxLength: 30 }),
         password: t.String({ maxLength: 200 }),
       }),
@@ -125,24 +126,36 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
   )
   .post(
     "/login",
-    async ({ body, cookie }) => {
-      const identifier = body.identifier.trim().toLowerCase();
-      if (!identifier) badRequest("Enter your email or username.");
+    async ({ body, cookie, request, server, set }) => {
+      const limit = checkRateLimit(
+        `login:${clientIp(request, server, env.trustProxy)}`,
+        10,
+        10 * 60 * 1000,
+      );
+      if (!limit.allowed) {
+        set.status = 429;
+        set.headers["retry-after"] = String(limit.retryAfter);
+        return { error: "Too many attempts. Try again later." };
+      }
+
+      const username = body.username.trim().toLowerCase();
+      if (!username) badRequest("Enter your username.");
 
       const [user] = await db
         .select()
         .from(users)
-        .where(
-          sql`lower(${users.email}) = ${identifier} or lower(${users.username}) = ${identifier}`,
-        )
+        .where(sql`lower(${users.username}) = ${username}`)
         .limit(1);
 
-      const valid = user
-        ? await verifyPassword(body.password, user.passwordHash)
-        : false;
+      // Always run a bcrypt comparison — against a dummy hash when the
+      // account doesn't exist — so timing can't reveal registered accounts.
+      const passwordOk = await verifyPassword(
+        body.password,
+        user ? user.passwordHash : DUMMY_PASSWORD_HASH,
+      );
 
-      if (!user || !valid) {
-        throw new HttpError(401, "Incorrect email, username or password.");
+      if (!user || !passwordOk) {
+        throw new HttpError(401, "Incorrect username or password.");
       }
 
       const token = await createSession(user.id);
@@ -152,7 +165,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
     },
     {
       body: t.Object({
-        identifier: t.String({ maxLength: 320 }),
+        username: t.String({ maxLength: 30 }),
         password: t.String({ maxLength: 200 }),
       }),
     },
@@ -229,6 +242,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
 
       const passwordHash = await hashPassword(newPassword);
       await db.update(users).set({ passwordHash }).where(sql`${users.id} = ${user.id}`);
+
+      // Revoke every other session so a stolen session can't survive this change.
+      await destroyOtherSessions(cookie, user.id);
 
       return { ok: true };
     },

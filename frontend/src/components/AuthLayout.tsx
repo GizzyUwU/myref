@@ -19,13 +19,13 @@ export function AuthLayout(props: {
             without the paywall.
           </h2>
           <p class="auth-brand-sub">
-            Built around the official University of Northampton CSL style, so
-            your references match what your tutors expect.
+            Works with thousands of CSL citation styles, so your references
+            match whatever your tutors expect.
           </p>
 
           <div class="sample-card">
             <div class="sample-card-head">
-              <span class="style-chip light">Northampton Harvard</span>
+              <span class="style-chip light">Harvard style</span>
               <span class="sample-label">Reference preview</span>
             </div>
             <p>

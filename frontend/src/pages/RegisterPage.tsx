@@ -16,7 +16,6 @@ export function RegisterPage() {
   });
   const registrationEnabled = () => config()?.registrationEnabled ?? true;
   const [username, setUsername] = createSignal("");
-  const [email, setEmail] = createSignal("");
   const [password, setPassword] = createSignal("");
   const [confirm, setConfirm] = createSignal("");
   const [error, setError] = createSignal("");
@@ -40,7 +39,6 @@ export function RegisterPage() {
 
     try {
       await auth.register({
-        email: email(),
         username: username(),
         password: password(),
       });
@@ -58,7 +56,7 @@ export function RegisterPage() {
     <Show when={!auth.user()} fallback={<Navigate href="/app" />}>
       <AuthLayout
         title="Create your account"
-        subtitle="Free referencing with the official University of Northampton CSL style."
+        subtitle="Free referencing with thousands of citation styles."
       >
         <Show
           when={registrationEnabled()}
@@ -84,17 +82,6 @@ export function RegisterPage() {
               minLength={3}
               maxLength={30}
               pattern="[A-Za-z0-9_]+"
-            />
-          </Field>
-
-          <Field label="Email">
-            <input
-              type="email"
-              value={email()}
-              onInput={(event) => setEmail(event.currentTarget.value)}
-              placeholder="you@example.com"
-              autocomplete="email"
-              required
             />
           </Field>
 

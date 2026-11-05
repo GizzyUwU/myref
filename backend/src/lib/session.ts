@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, gt, sql } from "drizzle-orm";
+import { and, eq, gt, ne, sql } from "drizzle-orm";
 import type { Cookie } from "elysia";
 import { db } from "../db";
 import { sessions, users, type User } from "../db/schema";
@@ -10,12 +10,11 @@ export const sessionCookieKey = "myref_session";
 
 export type SessionCookies = Record<string, Cookie<unknown>>;
 
-export type PublicUser = Pick<User, "id" | "email" | "username" | "createdAt">;
+export type PublicUser = Pick<User, "id" | "username" | "createdAt">;
 
 export function publicUser(user: User): PublicUser {
   return {
     id: user.id,
-    email: user.email,
     username: user.username,
     createdAt: user.createdAt,
   };
@@ -93,4 +92,26 @@ export async function destroySession(cookie: SessionCookies): Promise<void> {
   const token = cookie[sessionCookieKey]?.value;
   if (typeof token !== "string" || !token) return;
   await db.delete(sessions).where(eq(sessions.tokenHash, hashToken(token)));
+}
+
+/** Delete every session for the user except the one in the given cookie,
+ *  so a password change revokes stolen sessions without logging the user
+ *  out of their current device. */
+export async function destroyOtherSessions(
+  cookie: SessionCookies,
+  userId: string,
+): Promise<void> {
+  const token = cookie[sessionCookieKey]?.value;
+  if (typeof token !== "string" || !token) {
+    await db.delete(sessions).where(eq(sessions.userId, userId));
+    return;
+  }
+  await db
+    .delete(sessions)
+    .where(
+      and(
+        eq(sessions.userId, userId),
+        ne(sessions.tokenHash, hashToken(token)),
+      ),
+    );
 }

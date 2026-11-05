@@ -5,10 +5,8 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-myref}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-myref}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment or .env file}
       POSTGRES_DB: ${POSTGRES_DB:-myref}
-    ports:
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - myref_pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -28,16 +26,31 @@ services:
     container_name: myref-backend
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-443}:3000"
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-myref}:${POSTGRES_PASSWORD:-myref}@db:5432/${POSTGRES_DB:-myref}
+      DATABASE_URL: postgres://${POSTGRES_USER:-myref}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment or .env file}@db:5432/${POSTGRES_DB:-myref}
+      NODE_ENV: production
+      # Direct TLS termination (self-signed localhost certs in ./certs are a
+      # dev placeholder — mount real certs in production).
+      TLS_CERT_PATH: /certs/cert.pem
+      TLS_KEY_PATH: /certs/key.pem
+      # Reverse-proxy alternative: terminate TLS at the proxy instead, then
+      # replace the TLS_* lines above with TRUST_PROXY: "true", stop
+      # publishing this service's ports publicly, and let the proxy forward
+      # to http://backend:3000 (set APP_ORIGIN to the public https:// origin).
+      # TRUST_PROXY: "true"
       PORT: "3000"
-      APP_ORIGIN: ${APP_ORIGIN:-http://localhost:${PORT:-3000}}
+      # Optional Sentry DSN for server-error reporting (tracing stays off).
+      # Leave unset for zero overhead / nothing leaving the machine.
+      # SENTRY_DSN: ${SENTRY_DSN:-}
+      APP_ORIGIN: ${APP_ORIGIN:-https://localhost:${PORT:-443}}
+    volumes:
+      - ./certs:/certs:ro
     depends_on:
       db:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').then((r) => { if (!r.ok) process.exit(1) })"]
+      test: ["CMD", "bun", "-e", "fetch('https://localhost:3000/api/health', { tls: { rejectUnauthorized: false } }).then((r) => { if (!r.ok) process.exit(1) })"]
       interval: 10s
       timeout: 5s
       retries: 12

@@ -1,5 +1,5 @@
 import { Elysia, t } from "elysia";
-import { and, asc, eq, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, inArray, sql, type SQL } from "drizzle-orm";
 import { encode } from "he";
 import sanitize from "sanitize-filename";
 import { db } from "../db";
@@ -13,7 +13,13 @@ import {
 } from "../db/schema";
 import { loadCslStyle } from "../lib/csl-styles";
 import { toBibtex, toRis } from "../lib/export";
-import { formatBibliography, sortReferences } from "../lib/format";
+import {
+  formatBibliography,
+  getCachedBibliography,
+  invalidateBibliography,
+  setCachedBibliography,
+  sortReferences,
+} from "../lib/format";
 import { badRequest, notFound } from "../lib/http";
 import { getOwnedProject, isUuid } from "../lib/projects";
 import { requireUser } from "../lib/session";
@@ -161,6 +167,8 @@ export const referenceRoutes = new Elysia()
         .set({ updatedAt: new Date() })
         .where(eq(projects.id, project.id));
 
+      invalidateBibliography(project.id);
+
       return { reference };
     },
     { body: referenceInput },
@@ -194,6 +202,8 @@ export const referenceRoutes = new Elysia()
         .set({ updatedAt: new Date() })
         .where(eq(projects.id, existing.projectId));
 
+      invalidateBibliography(existing.projectId);
+
       return { reference };
     },
     { body: referenceInput },
@@ -216,8 +226,96 @@ export const referenceRoutes = new Elysia()
       .set({ updatedAt: new Date() })
       .where(eq(projects.id, existing.projectId));
 
+    invalidateBibliography(existing.projectId);
+
     return { ok: true };
   })
+  .post(
+    "/references/duplicate",
+    async ({ body, cookie }) => {
+      const user = await requireUser(cookie);
+      const target = await getOwnedProject(user.id, body.projectId);
+
+      const ids = [...new Set(body.ids)].filter(isUuid).slice(0, 200);
+      if (ids.length === 0) badRequest("Select at least one reference.");
+
+      const rows = await db
+        .select()
+        .from(references)
+        .where(and(inArray(references.id, ids), eq(references.userId, user.id)));
+
+      if (rows.length === 0) notFound("No matching references.");
+
+      const copies = rows.map((row) => {
+        const { id, projectId, userId, createdAt, updatedAt, ...fields } = row;
+        return { ...fields, projectId: target.id, userId: user.id };
+      });
+
+      const created = await db
+        .insert(references)
+        .values(copies)
+        .returning();
+
+      await db
+        .update(projects)
+        .set({ updatedAt: new Date() })
+        .where(eq(projects.id, target.id));
+
+      invalidateBibliography(target.id);
+
+      return { references: created, projectId: target.id };
+    },
+    {
+      body: t.Object({
+        ids: t.Array(t.String({ maxLength: 40 }), { maxItems: 200 }),
+        projectId: t.String({ maxLength: 40 }),
+      }),
+    },
+  )
+  .post(
+    "/references/delete",
+    async ({ body, cookie }) => {
+      const user = await requireUser(cookie);
+
+      const ids = [...new Set(body.ids)].filter(isUuid).slice(0, 200);
+      if (ids.length === 0) badRequest("Select at least one reference.");
+
+      const rows = await db
+        .select({ id: references.id, projectId: references.projectId })
+        .from(references)
+        .where(
+          and(inArray(references.id, ids), eq(references.userId, user.id)),
+        );
+
+      if (rows.length === 0) notFound("No matching references.");
+
+      const foundIds = rows.map((row) => row.id);
+      await db
+        .delete(references)
+        .where(
+          and(
+            inArray(references.id, foundIds),
+            eq(references.userId, user.id),
+          ),
+        );
+
+      const projectIds = [...new Set(rows.map((row) => row.projectId))];
+      for (const projectId of projectIds) {
+        await db
+          .update(projects)
+          .set({ updatedAt: new Date() })
+          .where(eq(projects.id, projectId));
+        invalidateBibliography(projectId);
+      }
+
+      return { deleted: foundIds };
+    },
+    {
+      body: t.Object({
+        ids: t.Array(t.String({ maxLength: 40 }), { maxItems: 200 }),
+      }),
+    },
+  )
   .get("/projects/:projectId/bibliography", async ({ params, cookie }) => {
     const user = await requireUser(cookie);
     const project = await getOwnedProject(user.id, params.projectId);
@@ -229,7 +327,21 @@ export const referenceRoutes = new Elysia()
 
     const style = await loadCslStyle(project.styleId);
 
-    return formatBibliography(rows, style);
+    const cached = getCachedBibliography(
+      project.id,
+      project.updatedAt,
+      style.id,
+    );
+    if (cached) return cached;
+
+    const bibliography = formatBibliography(rows, style);
+    setCachedBibliography(
+      project.id,
+      project.updatedAt,
+      style.id,
+      bibliography,
+    );
+    return bibliography;
   })
   .get(
     "/projects/:projectId/export",
@@ -262,7 +374,20 @@ export const referenceRoutes = new Elysia()
       }
 
       const style = await loadCslStyle(project.styleId);
-      const bibliography = formatBibliography(rows, style);
+      const cached = getCachedBibliography(
+        project.id,
+        project.updatedAt,
+        style.id,
+      );
+      const bibliography = cached ?? formatBibliography(rows, style);
+      if (!cached) {
+        setCachedBibliography(
+          project.id,
+          project.updatedAt,
+          style.id,
+          bibliography,
+        );
+      }
       const entries = bibliography.entries;
 
       if (format === "html") {

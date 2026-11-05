@@ -1,13 +1,28 @@
 import { Navigate, Route, Router } from "@solidjs/router";
-import { onMount, Show } from "solid-js";
+import { lazy, onMount, Show } from "solid-js";
 import { Logo } from "./components/Brand";
-import { DashboardPage } from "./pages/DashboardPage";
-import { LoginPage } from "./pages/LoginPage";
-import { NotFoundPage } from "./pages/NotFoundPage";
-import { ProjectPage } from "./pages/ProjectPage";
-import { RegisterPage } from "./pages/RegisterPage";
-import { SettingsPage } from "./pages/SettingsPage";
 import { auth } from "./store/auth";
+
+// Route-split: each page becomes its own chunk so first paint only
+// downloads the shell + router + the page actually visited.
+const DashboardPage = lazy(() =>
+  import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })),
+);
+const LoginPage = lazy(() =>
+  import("./pages/LoginPage").then((m) => ({ default: m.LoginPage })),
+);
+const NotFoundPage = lazy(() =>
+  import("./pages/NotFoundPage").then((m) => ({ default: m.NotFoundPage })),
+);
+const ProjectPage = lazy(() =>
+  import("./pages/ProjectPage").then((m) => ({ default: m.ProjectPage })),
+);
+const RegisterPage = lazy(() =>
+  import("./pages/RegisterPage").then((m) => ({ default: m.RegisterPage })),
+);
+const SettingsPage = lazy(() =>
+  import("./pages/SettingsPage").then((m) => ({ default: m.SettingsPage })),
+);
 
 function Splash() {
   return (

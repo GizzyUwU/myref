@@ -3,6 +3,7 @@ import { createEffect, createSignal, Show } from "solid-js";
 import { api, ApiError } from "../api";
 import { AppShell } from "../components/AppShell";
 import { auth } from "../store/auth";
+import { themeLabels, themes, themeStore, type Theme } from "../store/theme";
 import { toast } from "../store/toast";
 
 export function SettingsPage() {
@@ -129,6 +130,30 @@ export function SettingsPage() {
           <section class="panel">
             <header class="panel-header">
               <div>
+                <h2>Appearance</h2>
+                <p class="panel-subtitle">Choose a light or dark theme.</p>
+              </div>
+            </header>
+            <div class="settings-form">
+              <label class="field">
+                <span class="field-label">Theme</span>
+                <select
+                  value={themeStore.theme()}
+                  onChange={(event) =>
+                    themeStore.setTheme(event.currentTarget.value as Theme)
+                  }
+                >
+                  {themes.map((option) => (
+                    <option value={option}>{themeLabels[option]}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
+          </section>
+
+          <section class="panel">
+            <header class="panel-header">
+              <div>
                 <h2>Profile</h2>
                 <p class="panel-subtitle">Rename your account.</p>
               </div>
@@ -145,7 +170,7 @@ export function SettingsPage() {
                   required
                 />
               </label>
-              <p class="subtle small">Signed in as {auth.user()?.email ?? ""}.</p>
+              <p class="subtle small">Signed in as {auth.user()?.username ?? ""}.</p>
               <Show when={renameError()}>
                 <p class="form-error">{renameError()}</p>
               </Show>

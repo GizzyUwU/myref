@@ -6,7 +6,7 @@ import { hashPassword } from "./lib/password";
 function usage(): never {
   console.error(`Usage:
   bun src/cli.ts list-users
-  bun src/cli.ts reset-password <email|username> <new-password>
+  bun src/cli.ts reset-password <username> <new-password>
 
   reset-password sets a new password (8-128 characters) and revokes
   all existing sessions for the account.`);
@@ -14,22 +14,20 @@ function usage(): never {
 }
 
 async function listUsers(): Promise<void> {
-  const rows = await db
-    .select({ email: users.email, username: users.username })
-    .from(users);
+  const rows = await db.select({ username: users.username }).from(users);
   for (const row of rows) {
-    console.log(`${row.username} <${row.email}>`);
+    console.log(row.username);
   }
   console.log(`${rows.length} user(s).`);
 }
 
 async function resetPassword(
-  identifier: string,
+  username: string,
   newPassword: string,
 ): Promise<void> {
-  const normalized = identifier.trim().toLowerCase();
+  const normalized = username.trim().toLowerCase();
   if (!normalized) {
-    console.error("Enter an email address or username.");
+    console.error("Enter a username.");
     process.exit(1);
   }
   if (newPassword.length < 8) {
@@ -44,13 +42,11 @@ async function resetPassword(
   const [user] = await db
     .select()
     .from(users)
-    .where(
-      sql`lower(${users.email}) = ${normalized} or lower(${users.username}) = ${normalized}`,
-    )
+    .where(sql`lower(${users.username}) = ${normalized}`)
     .limit(1);
 
   if (!user) {
-    console.error(`No account found for "${identifier}".`);
+    console.error(`No account found for "${username}".`);
     process.exit(1);
   }
 
@@ -62,7 +58,7 @@ async function resetPassword(
     .returning({ id: sessions.id });
 
   console.log(
-    `Password reset for ${user.username} <${user.email}>. ${revoked.length} session(s) revoked.`,
+    `Password reset for ${user.username}. ${revoked.length} session(s) revoked.`,
   );
 }
 

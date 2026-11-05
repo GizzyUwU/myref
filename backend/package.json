@@ -16,6 +16,7 @@
   "dependencies": {
     "@elysiajs/cors": "latest",
     "@elysiajs/static": "latest",
+    "@sentry/bun": "^11.10.0",
     "citeproc": "^2.4.63",
     "dotenv": "latest",
     "drizzle-orm": "latest",

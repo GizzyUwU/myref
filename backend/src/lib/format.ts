@@ -52,6 +52,61 @@ export type FormattedBibliography = {
   citations: FormattedCitation[];
 };
 
+// --- Bibliography result cache ---
+// formatBibliography runs citeproc (hundreds of ms for large projects), but
+// its inputs only change when the project's references/style change — and
+// every such mutation bumps projects.updatedAt. Cache keyed on
+// (projectId, updatedAt, styleId) with explicit invalidation on mutation.
+
+const BIB_CACHE_MAX_PROJECTS = 50;
+const BIB_CACHE_MAX_CHARS = 2_000_000;
+
+const bibCache = new Map<
+  string,
+  { key: string; result: FormattedBibliography }
+>();
+
+function bibCacheSize(result: FormattedBibliography): number {
+  let size = 0;
+  for (const entry of result.entries) size += entry.html.length + entry.plain.length;
+  return size;
+}
+
+export function getCachedBibliography(
+  projectId: string,
+  updatedAt: Date,
+  styleId: string,
+): FormattedBibliography | null {
+  const entry = bibCache.get(projectId);
+  if (!entry) return null;
+  if (entry.key !== `${updatedAt.getTime()}:${styleId}`) {
+    bibCache.delete(projectId);
+    return null;
+  }
+  return entry.result;
+}
+
+export function setCachedBibliography(
+  projectId: string,
+  updatedAt: Date,
+  styleId: string,
+  result: FormattedBibliography,
+): void {
+  if (bibCacheSize(result) > BIB_CACHE_MAX_CHARS) return;
+  if (!bibCache.has(projectId) && bibCache.size >= BIB_CACHE_MAX_PROJECTS) {
+    const oldest = bibCache.keys().next();
+    if (!oldest.done) bibCache.delete(oldest.value);
+  }
+  bibCache.set(projectId, {
+    key: `${updatedAt.getTime()}:${styleId}`,
+    result,
+  });
+}
+
+export function invalidateBibliography(projectId: string): void {
+  bibCache.delete(projectId);
+}
+
 const cslTypes: Record<ReferenceRow["type"], string> = {
   book: "book",
   chapter: "chapter",

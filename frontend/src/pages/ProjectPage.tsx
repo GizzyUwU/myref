@@ -8,6 +8,7 @@ import {
   Show,
 } from "solid-js";
 import { Portal } from "solid-js/web";
+import { createVirtualizer } from "@tanstack/solid-virtual";
 import { api, ApiError, exportUrl } from "../api";
 import { AppShell } from "../components/AppShell";
 import { ReferenceDialog } from "../components/ReferenceDialog";
@@ -21,6 +22,7 @@ import {
   emptyDraft,
   toDraft,
   type CslStyleSummary,
+  type Project,
   type Reference,
   type ReferenceDraft,
   type ReferenceType,
@@ -96,6 +98,19 @@ export function ProjectPage() {
   );
   const [styleSearchLoading, setStyleSearchLoading] = createSignal(false);
   const [styleSaving, setStyleSaving] = createSignal(false);
+
+  // Virtualized style list: the catalog holds ~11k styles, so only the
+  // visible rows are mounted. Row heights are measured dynamically.
+  let styleScrollEl!: HTMLDivElement;
+  const styleVirtualizer = createVirtualizer({
+    get count() {
+      return styleResults().length;
+    },
+    getScrollElement: () => styleScrollEl,
+    estimateSize: () => 84,
+    overscan: 8,
+    getItemKey: (index) => styleResults()[index]?.id ?? index,
+  });
 
   const [importValue, setImportValue] = createSignal("");
   const [importing, setImporting] = createSignal(false);
@@ -224,6 +239,81 @@ export function ProjectPage() {
     bibliography()?.citations.find((citation) => citation.id === referenceId)
       ?.inText ?? "";
 
+  // Multi-select: checkboxes on each card feed a shared id set, so the
+  // selection bar can copy just those references.
+  const [selectedIds, setSelectedIds] = createSignal<Set<string>>(
+    new Set<string>(),
+  );
+  const isSelected = (id: string) => selectedIds().has(id);
+
+  function toggleSelected(id: string): void {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function clearSelection(): void {
+    setSelectedIds(new Set<string>());
+  }
+
+  // "Select all" targets the currently visible (filtered) references and
+  // shows an indeterminate state for partial selection.
+  let selectAllEl!: HTMLInputElement;
+
+  function toggleSelectAllVisible(): void {
+    const visible = filteredReferences();
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      const allSelected = visible.every((reference) => prev.has(reference.id));
+      for (const reference of visible) {
+        if (allSelected) next.delete(reference.id);
+        else next.add(reference.id);
+      }
+      return next;
+    });
+  }
+
+  createEffect(() => {
+    const visible = filteredReferences();
+    const selected = selectedIds();
+    if (!selectAllEl) return;
+    const count = visible.filter((reference) =>
+      selected.has(reference.id),
+    ).length;
+    selectAllEl.checked = visible.length > 0 && count === visible.length;
+    selectAllEl.indeterminate = count > 0 && count < visible.length;
+  });
+
+  // Selection belongs to one project; drop it when navigating.
+  createEffect(() => {
+    projectId();
+    clearSelection();
+  });
+
+  function selectedEntries() {
+    const selected = selectedIds();
+    if (selected.size === 0) return [];
+    return entries().filter((entry) => selected.has(entry.id));
+  }
+
+  // Side panel follows the selection: when anything is checked, the
+  // bibliography and in-text tabs show only the selected references.
+  const visibleEntries = createMemo(() => {
+    const selected = selectedIds();
+    const all = entries();
+    if (selected.size === 0) return all;
+    return all.filter((entry) => selected.has(entry.id));
+  });
+  const visibleCitations = createMemo(() => {
+    const selected = selectedIds();
+    const all = bibliography()?.citations ?? [];
+    if (selected.size === 0) return all;
+    return all.filter((citation) => selected.has(citation.id));
+  });
+
   function refreshAll() {
     void refetchReferences();
     void refetchBibliography();
@@ -331,7 +421,10 @@ export function ProjectPage() {
 
     try {
       const { styles } = await api.searchStyles(query);
-      if (requestId === styleRequestId) setStyleResults(styles);
+      if (requestId === styleRequestId) {
+        setStyleResults(styles);
+        styleScrollEl?.scrollTo({ top: 0 });
+      }
     } catch (caught) {
       if (requestId === styleRequestId) {
         toast(
@@ -394,13 +487,10 @@ export function ProjectPage() {
     }
   }
 
-  async function copyBibliography() {
-    const items = entries();
-    if (items.length === 0) {
-      toast("Add a reference first.", "info");
-      return;
-    }
-
+  async function writeBibliography(
+    items: { html: string; plain: string }[],
+    successMessage: string,
+  ): Promise<void> {
     const font = copyFont() || "Calibri, Arial, sans-serif";
     const html = items
       .map(
@@ -424,7 +514,7 @@ export function ProjectPage() {
       } else {
         await navigator.clipboard.writeText(plain);
       }
-      toast("Bibliography copied.", "success");
+      toast(successMessage, "success");
     } catch {
       try {
         await navigator.clipboard.writeText(plain);
@@ -435,6 +525,55 @@ export function ProjectPage() {
     }
   }
 
+  async function copyBibliography() {
+    const items = entries();
+    if (items.length === 0) {
+      toast("Add a reference first.", "info");
+      return;
+    }
+
+    await writeBibliography(items, "Bibliography copied.");
+  }
+
+  async function copySelectedBibliography() {
+    const items = selectedEntries();
+    if (items.length === 0) {
+      toast("Select at least one reference first.", "info");
+      return;
+    }
+
+    await writeBibliography(
+      items,
+      items.length === 1
+        ? "Bibliography entry copied."
+        : `Bibliography copied (${items.length} references).`,
+    );
+  }
+
+  async function copySelectedInText() {
+    const selected = selectedIds();
+    if (selected.size === 0) {
+      toast("Select at least one reference first.", "info");
+      return;
+    }
+
+    const texts = (bibliography()?.citations ?? [])
+      .filter((citation) => selected.has(citation.id))
+      .map((citation) => citation.inText)
+      .filter(Boolean);
+    if (texts.length === 0) {
+      toast("Those citations are not ready yet.", "info");
+      return;
+    }
+
+    await copyText(
+      texts.join("\n"),
+      texts.length === 1
+        ? "In-text citation copied."
+        : `In-text citations copied (${texts.length}).`,
+    );
+  }
+
   function downloadBibliography() {
     if (entries().length === 0) {
       toast("Add a reference first.", "info");
@@ -443,12 +582,103 @@ export function ProjectPage() {
     downloadUrl(exportUrl(projectId(), exportFormat()));
   }
 
+  const [duplicateOpen, setDuplicateOpen] = createSignal(false);
+  const [duplicateTargets, setDuplicateTargets] = createSignal<Project[]>([]);
+  const [duplicateLoading, setDuplicateLoading] = createSignal(false);
+  const [duplicateSaving, setDuplicateSaving] = createSignal(false);
+
+  async function openDuplicateDialog() {
+    if (selectedIds().size === 0) return;
+    setDuplicateOpen(true);
+    setDuplicateLoading(true);
+    try {
+      const { projects } = await api.projects();
+      setDuplicateTargets(projects.filter((p) => p.id !== projectId()));
+    } catch (caught) {
+      toast(
+        caught instanceof ApiError ? caught.message : "Could not load projects.",
+        "error",
+      );
+      setDuplicateOpen(false);
+    } finally {
+      setDuplicateLoading(false);
+    }
+  }
+
+  async function duplicateSelected(project: Project) {
+    const ids = [...selectedIds()];
+    if (ids.length === 0) return;
+    setDuplicateSaving(true);
+    try {
+      const result = await api.duplicateReferences({
+        ids,
+        projectId: project.id,
+      });
+      toast(
+        result.references.length === 1
+          ? `Duplicated 1 reference to “${project.name}”.`
+          : `Duplicated ${result.references.length} references to “${project.name}”.`,
+        "success",
+      );
+      setDuplicateOpen(false);
+    } catch (caught) {
+      toast(
+        caught instanceof ApiError
+          ? caught.message
+          : "Could not duplicate references.",
+        "error",
+      );
+    } finally {
+      setDuplicateSaving(false);
+    }
+  }
+  async function removeSelected() {
+    const ids = [...selectedIds()];
+    if (ids.length === 0) return;
+    const confirmed = window.confirm(
+      ids.length === 1
+        ? "Delete this reference? This cannot be undone."
+        : `Delete these ${ids.length} references? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    try {
+      const result = await api.deleteReferences({ ids });
+      const deleted = new Set(result.deleted);
+      setSelectedIds((prev) => {
+        const next = new Set<string>();
+        for (const id of prev) if (!deleted.has(id)) next.add(id);
+        return next;
+      });
+      toast(
+        result.deleted.length === 1
+          ? "Reference deleted."
+          : `${result.deleted.length} references deleted.`,
+        "success",
+      );
+      refreshAll();
+    } catch (caught) {
+      toast(
+        caught instanceof ApiError
+          ? caught.message
+          : "Could not delete references.",
+        "error",
+      );
+    }
+  }
+
   async function removeReference(reference: Reference) {
     const confirmed = window.confirm(`Delete "${reference.title}"?`);
     if (!confirmed) return;
 
     try {
       await api.deleteReference(reference.id);
+      setSelectedIds((prev) => {
+        if (!prev.has(reference.id)) return prev;
+        const next = new Set(prev);
+        next.delete(reference.id);
+        return next;
+      });
       toast("Reference deleted.", "success");
       refreshAll();
     } catch (caught) {
@@ -613,12 +843,66 @@ export function ProjectPage() {
                         <option value="added-old">Date added: oldest first</option>
                       </select>
 
+                      <label class="select-all">
+                        <input
+                          ref={selectAllEl}
+                          type="checkbox"
+                          class="ref-select"
+                          onChange={toggleSelectAllVisible}
+                          aria-label="Select all visible references"
+                        />
+                        <span>All</span>
+                      </label>
+
                       <span class="count-chip">
                         {filteredReferences().length} of{" "}
                         {referencesResource()?.length ?? 0}
                       </span>
                     </div>
                   </div>
+
+                  <Show when={selectedIds().size > 0}>
+                    <div class="selection-bar">
+                      <span class="count-chip">
+                        {selectedIds().size} selected
+                      </span>
+                      <button
+                        type="button"
+                        class="btn btn-primary btn-sm"
+                        onClick={() => void copySelectedBibliography()}
+                      >
+                        Copy bibliography
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        onClick={openDuplicateDialog}
+                      >
+                        Duplicate
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-danger btn-sm"
+                        onClick={() => void removeSelected()}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        onClick={() => void copySelectedInText()}
+                      >
+                        Copy in-text
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        onClick={clearSelection}
+                      >
+                        Clear
+                      </button>
+                    </div>
+                  </Show>
 
                   <Show when={referencesResource.loading}>
                     <div class="loading-state compact">
@@ -658,7 +942,17 @@ export function ProjectPage() {
                   <div class="ref-list">
                     <For each={filteredReferences()}>
                       {(reference) => (
-                        <article class="ref-card">
+                        <article
+                          class="ref-card"
+                          classList={{ selected: isSelected(reference.id) }}
+                        >
+                          <input
+                            type="checkbox"
+                            class="ref-select"
+                            checked={isSelected(reference.id)}
+                            onChange={() => toggleSelected(reference.id)}
+                            aria-label={`Select ${reference.title}`}
+                          />
                           <span class={`type-badge type-${reference.type}`}>
                             {typeLabels[reference.type]}
                           </span>
@@ -756,12 +1050,14 @@ export function ProjectPage() {
                       <Show when={copyFont()}>
                         <style>{`.bib-panel .bib-entry, .bib-panel .bib-body { font-family: ${copyFont()}; font-size: 12pt; line-height: 1.6; }`}</style>
                       </Show>
-                      <Show when={entries().length === 0}>
+                      <Show when={visibleEntries().length === 0}>
                         <p class="subtle" style={`font-family: ${copyFont()}; font-size: 12pt;`}>
-                          Your formatted bibliography will appear here.
+                          {selectedIds().size > 0
+                            ? "None of the selected references have formatted entries yet."
+                            : "Your formatted bibliography will appear here."}
                         </p>
                       </Show>
-                      <For each={entries()}>
+                      <For each={visibleEntries()}>
                         {(entry) => (
                           <div class="bib-entry" innerHTML={entry.html} style={`font-family: ${copyFont()}; font-size: 12pt; line-height: 1.6;`} />
                         )}
@@ -769,12 +1065,14 @@ export function ProjectPage() {
                     </Show>
 
                     <Show when={tab() === "in-text"}>
-                      <Show when={(bibliography()?.citations.length ?? 0) === 0}>
+                      <Show when={visibleCitations().length === 0}>
                         <p class="subtle">
-                          In-text citations will appear here.
+                          {selectedIds().size > 0
+                            ? "None of the selected references have citations yet."
+                            : "In-text citations will appear here."}
                         </p>
                       </Show>
-                      <For each={bibliography()?.citations}>
+                      <For each={visibleCitations()}>
                         {(citation) => (
                           <div class="citation-row">
                             <code>{citation.inText}</code>
@@ -878,6 +1176,95 @@ export function ProjectPage() {
         }}
       />
 
+      <Show when={duplicateOpen()}>
+        <Portal>
+          <div
+            class="modal-overlay"
+            onClick={(event) => {
+              if (event.target === event.currentTarget) {
+                setDuplicateOpen(false);
+              }
+            }}
+          >
+            <div class="modal modal-small" role="dialog" aria-modal="true">
+              <header class="modal-header">
+                <div>
+                  <h2>Duplicate to project</h2>
+                  <p class="subtle">
+                    Copy {selectedIds().size}{" "}
+                    {selectedIds().size === 1 ? "reference" : "references"}{" "}
+                    to another project.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  class="icon-button"
+                  onClick={() => setDuplicateOpen(false)}
+                  aria-label="Close"
+                >
+                  ×
+                </button>
+              </header>
+
+              <div class="modal-body">
+                <Show when={duplicateLoading()}>
+                  <div class="loading-state compact">
+                    <span class="spinner" />
+                  </div>
+                </Show>
+
+                <Show
+                  when={!duplicateLoading() && duplicateTargets().length === 0}
+                >
+                  <p class="subtle">
+                    No other projects yet — create one from the dashboard
+                    first.
+                  </p>
+                </Show>
+
+                <div class="style-list">
+                  <For each={duplicateTargets()}>
+                    {(target) => (
+                      <button
+                        type="button"
+                        class="style-result"
+                        disabled={duplicateSaving()}
+                        onClick={() => void duplicateSelected(target)}
+                      >
+                        <span class="style-result-main">
+                          <span class="style-result-title">
+                            {target.name}
+                          </span>
+                          <span class="style-result-meta">
+                            {target.referenceCount}{" "}
+                            {target.referenceCount === 1
+                              ? "reference"
+                              : "references"}
+                          </span>
+                        </span>
+                        <span class="style-result-action">
+                          {duplicateSaving() ? "Copying..." : "Duplicate"}
+                        </span>
+                      </button>
+                    )}
+                  </For>
+                </div>
+              </div>
+
+              <footer class="modal-footer">
+                <button
+                  type="button"
+                  class="btn btn-ghost"
+                  onClick={() => setDuplicateOpen(false)}
+                >
+                  Cancel
+                </button>
+              </footer>
+            </div>
+          </div>
+        </Portal>
+      </Show>
+
       <Show when={styleDialogOpen()}>
         <Portal>
           <div
@@ -952,44 +1339,76 @@ export function ProjectPage() {
                   <p class="subtle">No styles found.</p>
                 </Show>
 
-                <div class="style-list">
-                  <For each={styleResults()}>
-                    {(style) => (
-                      <button
-                        type="button"
-                        class="style-result"
-                        classList={{
-                          active: style.id === projectResource()?.styleId,
-                        }}
-                        disabled={styleSaving()}
-                        onClick={() => void chooseStyle(style)}
-                      >
-                        <span class="style-result-main">
-                          <span class="style-result-title">
-                            {style.title}
-                            <Show when={style.isDefault}>
-                              <span class="style-result-badge">Default</span>
-                            </Show>
-                          </span>
-                          <span class="style-result-meta">
-                            {style.id}
-                            {style.format ? ` · ${style.format}` : ""}
-                            {style.dependent ? " · dependent" : ""}
-                            {style.updated
-                              ? ` · updated ${style.updated.slice(0, 10)}`
-                              : ""}
-                          </span>
-                        </span>
-                        <span class="style-result-action">
-                          {style.id === projectResource()?.styleId
-                            ? "Current"
-                            : styleSaving()
-                              ? "Applying..."
-                              : "Use"}
-                        </span>
-                      </button>
-                    )}
-                  </For>
+                <Show
+                  when={!styleSearchLoading() && styleResults().length > 0}
+                >
+                  <p class="subtle small" style={{ margin: "0 0 8px" }}>
+                    {styleResults().length.toLocaleString()} styles
+                    {styleQuery().trim()
+                      ? ` matching “${styleQuery().trim()}”`
+                      : " — type to filter"}
+                  </p>
+                </Show>
+
+                <div class="style-list" ref={styleScrollEl}>
+                  <div
+                    class="style-virtual-sizer"
+                    style={{ height: `${styleVirtualizer.getTotalSize()}px` }}
+                  >
+                    <For each={styleVirtualizer.getVirtualItems()}>
+                      {(virtualRow) => {
+                        const result = styleResults()[virtualRow.index];
+                        if (!result) return null;
+                        return (
+                          <div
+                            class="style-virtual-row"
+                            data-index={virtualRow.index}
+                            ref={styleVirtualizer.measureElement}
+                            style={{
+                              transform: `translateY(${virtualRow.start}px)`,
+                            }}
+                          >
+                            <button
+                              type="button"
+                              class="style-result"
+                              classList={{
+                                active:
+                                  result.id === projectResource()?.styleId,
+                              }}
+                              disabled={styleSaving()}
+                              onClick={() => void chooseStyle(result)}
+                            >
+                              <span class="style-result-main">
+                                <span class="style-result-title">
+                                  {result.title}
+                                  <Show when={result.isDefault}>
+                                    <span class="style-result-badge">
+                                      Default
+                                    </span>
+                                  </Show>
+                                </span>
+                                <span class="style-result-meta">
+                                  {result.id}
+                                  {result.format ? ` · ${result.format}` : ""}
+                                  {result.dependent ? " · dependent" : ""}
+                                  {result.updated
+                                    ? ` · updated ${result.updated.slice(0, 10)}`
+                                    : ""}
+                                </span>
+                              </span>
+                              <span class="style-result-action">
+                                {result.id === projectResource()?.styleId
+                                  ? "Current"
+                                  : styleSaving()
+                                    ? "Applying..."
+                                    : "Use"}
+                              </span>
+                            </button>
+                          </div>
+                        );
+                      }}
+                    </For>
+                  </div>
                 </div>
               </div>
 

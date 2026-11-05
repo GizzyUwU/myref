@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@solidjs/router": "latest",
+    "@tanstack/solid-virtual": "^3.13.53",
     "solid-js": "latest"
   },
   "devDependencies": {

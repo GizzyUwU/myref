@@ -5,11 +5,14 @@ import { Elysia } from "elysia";
 import { env } from "./env";
 import { defaultStyleTitle } from "./lib/csl-defaults";
 import { HttpError } from "./lib/http";
+import { initSentry, reportError } from "./lib/sentry";
 import { authRoutes } from "./routes/auth";
 import { lookupRoutes } from "./routes/lookup";
 import { projectRoutes } from "./routes/projects";
 import { referenceRoutes } from "./routes/references";
 import { styleRoutes } from "./routes/styles";
+
+initSentry();
 
 const app = new Elysia()
   .use(
@@ -46,6 +49,7 @@ const app = new Elysia()
     }
 
     console.error(error);
+    reportError(error);
     set.status = 500;
     return { error: "Something went wrong. Please try again." };
   })
@@ -85,18 +89,50 @@ if (existsSync(join(distDir, "index.html"))) {
 
     const file = Bun.file(filePath);
     if (await file.exists()) {
-      return new Response(file);
+      // Vite emits content-hashed filenames under /assets/: safe to cache
+      // for a year. HTML entry points must revalidate for fresh deploys.
+      const immutable = pathname.startsWith("/assets/");
+      return new Response(file, {
+        headers: {
+          "Cache-Control": immutable
+            ? "public, max-age=31536000, immutable"
+            : "no-cache",
+        },
+      });
     }
 
     const index = Bun.file(join(distDir, "index.html"));
     return new Response(index, {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-cache",
+      },
     });
   });
 }
 
-app.listen(env.port);
+const useTls = Boolean(env.tlsCertPath && env.tlsKeyPath);
+
+if (env.isProduction && !useTls && !env.trustProxy) {
+  throw new Error(
+    "Refusing to serve production traffic over plain HTTP: set TLS_CERT_PATH " +
+      "and TLS_KEY_PATH to terminate TLS directly, or set TRUST_PROXY=true " +
+      "when running behind a TLS-terminating reverse proxy.",
+  );
+}
+
+if (useTls) {
+  app.listen({
+    port: env.port,
+    tls: {
+      cert: Bun.file(env.tlsCertPath),
+      key: Bun.file(env.tlsKeyPath),
+    },
+  });
+} else {
+  app.listen(env.port);
+}
 
 console.log(
-  `MyRef API listening on http://localhost:${env.port} (${env.nodeEnv})`,
+  `MyRef API listening on ${useTls ? "https" : "http"}://localhost:${env.port} (${env.nodeEnv})`,
 );

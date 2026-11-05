@@ -24,14 +24,13 @@ async function loadMe(): Promise<void> {
   return pending;
 }
 
-async function login(identifier: string, password: string): Promise<User> {
-  const result = await api.login({ identifier, password });
+async function login(username: string, password: string): Promise<User> {
+  const result = await api.login({ username, password });
   setUser(result.user);
   return result.user;
 }
 
 async function register(input: {
-  email: string;
   username: string;
   password: string;
 }): Promise<User> {

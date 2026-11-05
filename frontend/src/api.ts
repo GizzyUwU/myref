@@ -58,17 +58,13 @@ async function request<T>(
 export const api = {
   me: () => request<{ user: User | null }>("/auth/me"),
 
-  register: (input: {
-    email: string;
-    username: string;
-    password: string;
-  }) =>
+  register: (input: { username: string; password: string }) =>
     request<{ user: User }>("/auth/register", {
       method: "POST",
       body: JSON.stringify(input),
     }),
 
-  login: (input: { identifier: string; password: string }) =>
+  login: (input: { username: string; password: string }) =>
     request<{ user: User }>("/auth/login", {
       method: "POST",
       body: JSON.stringify(input),
@@ -131,6 +127,21 @@ export const api = {
 
   deleteReference: (id: string) =>
     request<{ ok: true }>(`/references/${id}`, { method: "DELETE" }),
+
+  duplicateReferences: (input: { ids: string[]; projectId: string }) =>
+    request<{ references: Reference[]; projectId: string }>(
+      "/references/duplicate",
+      {
+        method: "POST",
+        body: JSON.stringify(input),
+      },
+    ),
+
+  deleteReferences: (input: { ids: string[] }) =>
+    request<{ deleted: string[] }>("/references/delete", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
 
   bibliography: (projectId: string) =>
     request<Bibliography>(`/projects/${projectId}/bibliography`),

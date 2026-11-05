@@ -5,6 +5,7 @@ import { projects, references } from "../db/schema";
 import { loadCslStyle } from "../lib/csl-styles";
 import { badRequest } from "../lib/http";
 import { getOwnedProject } from "../lib/projects";
+import { invalidateBibliography } from "../lib/format";
 import { requireUser } from "../lib/session";
 
 export const projectRoutes = new Elysia({ prefix: "/projects" })
@@ -137,6 +138,8 @@ export const projectRoutes = new Elysia({ prefix: "/projects" })
         .set(updates)
         .where(eq(projects.id, project.id))
         .returning();
+
+      invalidateBibliography(project.id);
 
       return { project: updated };
     },

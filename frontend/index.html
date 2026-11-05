@@ -5,12 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="MyRef — a free referencing and bibliography manager using University of Northampton Harvard style."
+      content="MyRef — a free referencing and bibliography manager with thousands of citation styles."
     />
     <title>MyRef — Referencing, sorted</title>
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      try {
+        var t = localStorage.getItem("myref-theme");
+        if (t === "dracula" || t === "macchiato" || t === "mocha")
+          document.documentElement.dataset.theme = t;
+      } catch (e) {}
+    </script>
     <script src="/src/index.tsx" type="module"></script>
   </body>
 </html>
