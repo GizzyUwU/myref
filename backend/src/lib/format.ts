@@ -1,65 +1,15 @@
 import CSL from "citeproc";
 import { decode } from "he";
 import type { Author, ReferenceRow } from "../db/schema";
-import type { LoadedCslStyle } from "./csl-styles";
-
-type CslName = {
-  family: string;
-  given?: string;
-};
-
-type CslDate = {
-  "date-parts": number[][];
-};
-
-type CslItem = {
-  id: string;
-  type: string;
-  title?: string;
-  author?: CslName[];
-  editor?: CslName[];
-  issued?: CslDate;
-  accessed?: CslDate;
-  "container-title"?: string;
-  publisher?: string;
-  "publisher-place"?: string;
-  edition?: string;
-  volume?: string;
-  issue?: string;
-  page?: string;
-  DOI?: string;
-  URL?: string;
-  genre?: string;
-};
-
-export type FormattedEntry = {
-  id: string;
-  type: ReferenceRow["type"];
-  plain: string;
-  html: string;
-};
-
-export type FormattedCitation = {
-  id: string;
-  inText: string;
-};
-
-export type FormattedBibliography = {
-  style: string;
-  styleId: string;
-  styleSource: string;
-  entries: FormattedEntry[];
-  citations: FormattedCitation[];
-};
-
-// --- Bibliography result cache ---
-// formatBibliography runs citeproc (hundreds of ms for large projects), but
-// its inputs only change when the project's references/style change — and
-// every such mutation bumps projects.updatedAt. Cache keyed on
-// (projectId, updatedAt, styleId) with explicit invalidation on mutation.
-
-const BIB_CACHE_MAX_PROJECTS = 50;
-const BIB_CACHE_MAX_CHARS = 2_000_000;
+import type { LoadedCslStyle } from "./csl-styles.types";
+import type {
+  CslDate,
+  CslItem,
+  CslName,
+  FormattedBibliography,
+  FormattedCitation,
+  FormattedEntry,
+} from "./format.types";
 
 const bibCache = new Map<
   string,
@@ -92,8 +42,8 @@ export function setCachedBibliography(
   styleId: string,
   result: FormattedBibliography,
 ): void {
-  if (bibCacheSize(result) > BIB_CACHE_MAX_CHARS) return;
-  if (!bibCache.has(projectId) && bibCache.size >= BIB_CACHE_MAX_PROJECTS) {
+  if (bibCacheSize(result) > 2_000_000) return;
+  if (!bibCache.has(projectId) && bibCache.size >= 50) {
     const oldest = bibCache.keys().next();
     if (!oldest.done) bibCache.delete(oldest.value);
   }
@@ -187,12 +137,10 @@ function toCslItem(row: ReferenceRow): CslItem {
   return item;
 }
 
-const entryOpen = '<div class="csl-entry">';
-
 function stripEntryWrapper(entry: string): string {
   let value = entry.trim();
-  if (value.startsWith(entryOpen)) {
-    value = value.slice(entryOpen.length);
+  if (value.startsWith('<div class="csl-entry">')) {
+    value = value.slice('<div class="csl-entry">'.length);
   }
   if (value.endsWith("</div>")) {
     value = value.slice(0, -"</div>".length);

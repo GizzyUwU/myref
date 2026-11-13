@@ -1,7 +1,4 @@
-// Minimal in-memory per-IP rate limiter for brute-force-sensitive endpoints.
-// Single-process store: the backend runs as one Bun process.
-
-type Bucket = { count: number; resetAt: number };
+import type { Bucket, RequestIPServer } from "./rate-limit.types";
 
 const buckets = new Map<string, Bucket>();
 let lastSweep = 0;
@@ -31,11 +28,6 @@ export function checkRateLimit(
   return { allowed: true, retryAfter: 0 };
 }
 
-type RequestIPServer = {
-  requestIP?: (request: Request) => { address: string } | null;
-};
-
-/** Best-effort client IP. X-Forwarded-For is only trusted behind a proxy. */
 export function clientIp(
   request: Request,
   server: unknown,

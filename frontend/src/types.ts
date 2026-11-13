@@ -4,6 +4,17 @@ export type User = {
   createdAt: string;
 };
 
+export type ApiToken = {
+  id: string;
+  name: string;
+  createdAt: string;
+  lastUsedAt: string | null;
+};
+
+export type MintedApiToken = ApiToken & {
+  token: string;
+};
+
 export type Author = {
   family: string;
   given?: string;

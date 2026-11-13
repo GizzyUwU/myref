@@ -1,16 +1,25 @@
 import { createHash, randomBytes } from "node:crypto";
 import { and, eq, gt, ne, sql } from "drizzle-orm";
-import type { Cookie } from "elysia";
 import { db } from "../db";
 import { sessions, users, type User } from "../db/schema";
 import { env } from "../env";
 import { unauthorized } from "./http";
+import { getApiTokenUser, bearerToken } from "./tokens";
+import type { PublicUser, SessionCookies } from "./session.types";
 
 export const sessionCookieKey = "myref_session";
 
-export type SessionCookies = Record<string, Cookie<unknown>>;
+export const extensionOriginPatterns = [
+  /^chrome-extension:\/\/[a-z]+$/,
+  /^moz-extension:\/\/[^/]+$/,
+];
 
-export type PublicUser = Pick<User, "id" | "username" | "createdAt">;
+export function isExtensionOrigin(
+  origin: string | null | undefined,
+): boolean {
+  if (!origin) return false;
+  return extensionOriginPatterns.some((pattern) => pattern.test(origin));
+}
 
 export function publicUser(user: User): PublicUser {
   return {
@@ -27,13 +36,19 @@ function hashToken(token: string): string {
 export function setSessionCookie(
   cookie: SessionCookies,
   token: string,
+  options?: { crossSite?: boolean },
 ): void {
   const session = cookie[sessionCookieKey];
   if (!session) return;
   session.value = token;
   session.path = "/";
   session.httpOnly = true;
-  session.sameSite = "lax";
+  if (options?.crossSite) {
+    session.sameSite = "none";
+    session.secure = true;
+  } else {
+    session.sameSite = "lax";
+  }
   session.maxAge = env.sessionDays * 24 * 60 * 60;
   if (env.isProduction) session.secure = true;
 }
@@ -61,9 +76,22 @@ export async function createSession(userId: string): Promise<string> {
 
 export async function getSessionUser(
   cookie: SessionCookies,
+  authHeader?: string | null,
 ): Promise<User | null> {
+  const info = await getAuthInfo(cookie, authHeader);
+  return info.user;
+}
+
+export async function getAuthInfo(
+  cookie: SessionCookies,
+  authHeader?: string | null,
+): Promise<{ user: User | null; tokenId: string | null }> {
+  const tokenAuth = await getApiTokenUser(bearerToken(authHeader));
+  if (tokenAuth) return { user: tokenAuth.user, tokenId: tokenAuth.tokenId };
+
   const token = cookie[sessionCookieKey]?.value;
-  if (typeof token !== "string" || !token) return null;
+  if (typeof token !== "string" || !token)
+    return { user: null, tokenId: null };
 
   const rows = await db
     .select({ user: users, sessionId: sessions.id })
@@ -78,12 +106,15 @@ export async function getSessionUser(
     .limit(1);
 
   const row = rows[0];
-  if (!row) return null;
-  return row.user;
+  if (!row) return { user: null, tokenId: null };
+  return { user: row.user, tokenId: null };
 }
 
-export async function requireUser(cookie: SessionCookies): Promise<User> {
-  const user = await getSessionUser(cookie);
+export async function requireUser(
+  cookie: SessionCookies,
+  authHeader?: string | null,
+): Promise<User> {
+  const user = await getSessionUser(cookie, authHeader);
   if (!user) unauthorized();
   return user;
 }
@@ -94,14 +125,16 @@ export async function destroySession(cookie: SessionCookies): Promise<void> {
   await db.delete(sessions).where(eq(sessions.tokenHash, hashToken(token)));
 }
 
-/** Delete every session for the user except the one in the given cookie,
- *  so a password change revokes stolen sessions without logging the user
- *  out of their current device. */
 export async function destroyOtherSessions(
   cookie: SessionCookies,
   userId: string,
+  authHeader?: string | null,
 ): Promise<void> {
-  const token = cookie[sessionCookieKey]?.value;
+  const token =
+    bearerToken(authHeader) ??
+    (typeof cookie[sessionCookieKey]?.value === "string"
+      ? (cookie[sessionCookieKey]?.value as string)
+      : undefined);
   if (typeof token !== "string" || !token) {
     await db.delete(sessions).where(eq(sessions.userId, userId));
     return;

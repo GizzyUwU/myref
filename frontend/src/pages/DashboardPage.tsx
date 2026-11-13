@@ -1,5 +1,5 @@
 import { Navigate, useNavigate } from "@solidjs/router";
-import { createResource, createSignal, For, Show } from "solid-js";
+import { createMemo, createResource, createSignal, For, Show } from "solid-js";
 import { api, ApiError } from "../api";
 import { AppShell } from "../components/AppShell";
 import { ProjectDialog } from "../components/ProjectDialog";
@@ -7,6 +7,58 @@ import { formatDate } from "../format";
 import { auth } from "../store/auth";
 import { toast } from "../store/toast";
 import type { Project } from "../types";
+
+type ProjectSort = "edited" | "name-az" | "name-za" | "refs" | "created";
+
+const projectSortKey = "myref:project-sort";
+
+function initialProjectSort(): ProjectSort {
+  try {
+    const stored = localStorage.getItem(projectSortKey);
+    if (
+      stored === "edited" ||
+      stored === "name-az" ||
+      stored === "name-za" ||
+      stored === "refs" ||
+      stored === "created"
+    )
+      return stored;
+  } catch {
+  }
+  return "edited";
+}
+
+function sortProjects(list: Project[], sort: ProjectSort): Project[] {
+  const arr = [...list];
+  switch (sort) {
+    case "name-az":
+      arr.sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+      );
+      break;
+    case "name-za":
+      arr.sort((a, b) =>
+        b.name.localeCompare(a.name, undefined, { sensitivity: "base" }),
+      );
+      break;
+    case "refs":
+      arr.sort((a, b) => b.referenceCount - a.referenceCount);
+      break;
+    case "created":
+      arr.sort(
+        (a, b) =>
+          Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""),
+      );
+      break;
+    case "edited":
+    default:
+      arr.sort(
+        (a, b) =>
+          Date.parse(b.updatedAt || "") - Date.parse(a.updatedAt || ""),
+      );
+  }
+  return arr;
+}
 
 export function DashboardPage() {
   const navigate = useNavigate();
@@ -17,6 +69,17 @@ export function DashboardPage() {
 
   const [dialogOpen, setDialogOpen] = createSignal(false);
   const [editing, setEditing] = createSignal<Project | null>(null);
+  const [sort, setSort] = createSignal<ProjectSort>(initialProjectSort());
+
+  function changeSort(value: ProjectSort) {
+    setSort(value);
+    try {
+      localStorage.setItem(projectSortKey, value);
+    } catch {
+    }
+  }
+
+  const sortedProjects = createMemo(() => sortProjects(projectList() ?? [], sort()));
 
   function openCreate() {
     setEditing(null);
@@ -59,12 +122,29 @@ export function DashboardPage() {
               Keep every assignment&apos;s sources in one tidy place.
             </p>
           </div>
-          <button type="button" class="btn btn-primary" onClick={openCreate}>
-            <span class="plus" aria-hidden="true">
-              +
-            </span>
-            New project
-          </button>
+          <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <select
+              value={sort()}
+              onChange={(event) =>
+                changeSort(event.currentTarget.value as ProjectSort)
+              }
+              aria-label="Sort projects"
+              title="Sort projects"
+              style="width: auto;"
+            >
+              <option value="edited">Last edited</option>
+              <option value="created">Newest</option>
+              <option value="name-az">Name: A to Z</option>
+              <option value="name-za">Name: Z to A</option>
+              <option value="refs">Most references</option>
+            </select>
+            <button type="button" class="btn btn-primary" onClick={openCreate}>
+              <span class="plus" aria-hidden="true">
+                +
+              </span>
+              New project
+            </button>
+          </div>
         </section>
 
         <Show when={projectList.loading}>
@@ -104,7 +184,7 @@ export function DashboardPage() {
         </Show>
 
         <div class="project-grid">
-          <For each={projectList()}>
+          <For each={sortedProjects()}>
             {(project) => (
               <article
                 class="project-card"

@@ -3,18 +3,36 @@ import { eq, sql } from "drizzle-orm";
 import { db } from "../db";
 import { env } from "../env";
 import { projects, users } from "../db/schema";
-import { badRequest, HttpError } from "../lib/http";
-import { hashPassword, verifyPassword, DUMMY_PASSWORD_HASH } from "../lib/password";
+import { badRequest, HttpError, notFound } from "../lib/http";
+import { isUuid } from "../lib/projects";
+import { hashPassword, verifyPassword, verifyPasswordSafe } from "../lib/password";
 import { checkRateLimit, clientIp } from "../lib/rate-limit";
 import {
   clearSessionCookie,
   createSession,
   destroyOtherSessions,
   destroySession,
+  getAuthInfo,
   getSessionUser,
+  isExtensionOrigin,
   publicUser,
+  requireUser,
   setSessionCookie,
 } from "../lib/session";
+import {
+  createApiToken,
+  listApiTokens,
+  revokeApiToken,
+  revokeCurrentToken,
+} from "../lib/tokens";
+import {
+  errorResponse,
+  meResponse,
+  okSchema,
+  tokenResponse,
+  tokensResponse,
+  userResponse,
+} from "../lib/api-schemas";
 
 function assertValidUsername(username: string): void {
   if (username.length < 3 || username.length > 30) {
@@ -39,13 +57,31 @@ function isUniqueViolation(error: unknown): boolean {
 }
 
 export const authRoutes = new Elysia({ prefix: "/auth" })
-  .get("/me", async ({ cookie }) => {
-    const user = await getSessionUser(cookie);
-    return { user: user ? publicUser(user) : null };
+  .get("/me", async ({ cookie, request }) => {
+    const info = await getAuthInfo(
+      cookie,
+      request.headers.get("authorization"),
+    );
+    return {
+      user: info.user ? publicUser(info.user) : null,
+      tokenId: info.tokenId,
+    };
+  }, {
+    detail: {
+      summary: "Current session",
+      description: "Returns the signed-in user. Used by the extension validateToken() call.",
+      tags: ["auth"],
+    },
+    response: meResponse,
   })
   .get("/config", () => ({
     registrationEnabled: env.registrationEnabled,
-  }))
+  }), {
+    detail: { summary: "Public config", tags: ["auth"] },
+    response: t.Object({
+      registrationEnabled: t.Boolean(),
+    }),
+  })
   .post(
     "/register",
     async ({ body, cookie, request, server, set }) => {
@@ -113,7 +149,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       }
 
       const token = await createSession(created.id);
-      setSessionCookie(cookie, token);
+      setSessionCookie(cookie, token, {
+        crossSite: isExtensionOrigin(request.headers.get("origin")),
+      });
 
       return { user: publicUser(created) };
     },
@@ -122,6 +160,11 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         username: t.String({ maxLength: 30 }),
         password: t.String({ maxLength: 200 }),
       }),
+      detail: { summary: "Register", tags: ["auth"] },
+      response: {
+        200: userResponse,
+        429: errorResponse,
+      },
     },
   )
   .post(
@@ -147,11 +190,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         .where(sql`lower(${users.username}) = ${username}`)
         .limit(1);
 
-      // Always run a bcrypt comparison — against a dummy hash when the
-      // account doesn't exist — so timing can't reveal registered accounts.
-      const passwordOk = await verifyPassword(
+      const passwordOk = await verifyPasswordSafe(
         body.password,
-        user ? user.passwordHash : DUMMY_PASSWORD_HASH,
+        user?.passwordHash,
       );
 
       if (!user || !passwordOk) {
@@ -159,7 +200,9 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       }
 
       const token = await createSession(user.id);
-      setSessionCookie(cookie, token);
+      setSessionCookie(cookie, token, {
+        crossSite: isExtensionOrigin(request.headers.get("origin")),
+      });
 
       return { user: publicUser(user) };
     },
@@ -168,17 +211,141 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         username: t.String({ maxLength: 30 }),
         password: t.String({ maxLength: 200 }),
       }),
+      detail: { summary: "Login", tags: ["auth"] },
+      response: {
+        200: userResponse,
+        429: errorResponse,
+      },
     },
   )
   .post("/logout", async ({ cookie }) => {
     await destroySession(cookie);
     clearSessionCookie(cookie);
     return { ok: true };
+  }, {
+    detail: { summary: "Logout", tags: ["auth"] },
+    response: okSchema,
+  })
+  .post(
+    "/token",
+    async ({ body, request, server, set }) => {
+      const limit = checkRateLimit(
+        `api-token:${clientIp(request, server, env.trustProxy)}`,
+        10,
+        10 * 60 * 1000,
+      );
+      if (!limit.allowed) {
+        set.status = 429;
+        set.headers["retry-after"] = String(limit.retryAfter);
+        return { error: "Too many attempts. Try again later." };
+      }
+
+      const username = body.username.trim().toLowerCase();
+      if (!username) badRequest("Enter your username.");
+
+      const [user] = await db
+        .select()
+        .from(users)
+        .where(sql`lower(${users.username}) = ${username}`)
+        .limit(1);
+
+      const passwordOk = await verifyPasswordSafe(
+        body.password,
+        user?.passwordHash,
+      );
+
+      if (!user || !passwordOk) {
+        throw new HttpError(401, "Incorrect username or password.");
+      }
+
+      const token = await createApiToken(
+        user.id,
+        body.name?.trim() || "Browser extension",
+      );
+      return { token };
+    },
+    {
+      body: t.Object({
+        username: t.String({ maxLength: 30 }),
+        password: t.String({ maxLength: 200 }),
+        name: t.Optional(t.String({ maxLength: 100 })),
+      }),
+      detail: {
+        summary: "Mint API token",
+        description: "Extension login: exchange username+password for a long-lived Bearer token. The extension stores only this token.",
+        tags: ["auth"],
+      },
+      response: {
+        200: tokenResponse,
+        429: errorResponse,
+      },
+    },
+  )
+  .get("/tokens", async ({ cookie, request }) => {
+    const user = await requireUser(
+      cookie,
+      request.headers.get("authorization"),
+    );
+    return { tokens: await listApiTokens(user.id) };
+  }, {
+    detail: { summary: "List API tokens", tags: ["auth"] },
+    response: tokensResponse,
+  })
+  .post(
+    "/tokens",
+    async ({ body, cookie, request }) => {
+      const user = await requireUser(
+        cookie,
+        request.headers.get("authorization"),
+      );
+      const token = await createApiToken(
+        user.id,
+        body.name?.trim() || "Browser extension",
+      );
+      return { token };
+    },
+    {
+      body: t.Object({
+        name: t.Optional(t.String({ maxLength: 100 })),
+      }),
+      detail: { summary: "Create API token", tags: ["auth"] },
+      response: tokenResponse,
+    },
+  )
+  .delete("/token", async ({ cookie, request }) => {
+    const revoked = await revokeCurrentToken(
+      request.headers.get("authorization"),
+    );
+    if (!revoked) notFound("Token not found.");
+    return { ok: true };
+  }, {
+    detail: {
+      summary: "Revoke current token",
+      description: "Extension disconnect: revokes the Bearer token used for this request.",
+      tags: ["auth"],
+    },
+    response: okSchema,
+  })
+  .delete("/tokens/:id", async ({ cookie, params, request }) => {
+    const user = await requireUser(
+      cookie,
+      request.headers.get("authorization"),
+    );
+    if (!isUuid(params.id)) notFound("Token not found.");
+    const revoked = await revokeApiToken(user.id, params.id);
+    if (!revoked) notFound("Token not found.");
+    return { ok: true };
+  }, {
+    detail: { summary: "Revoke API token", tags: ["auth"] },
+    response: okSchema,
   })
   .patch(
     "/username",
-    async ({ cookie, body }) => {
-      const user = await getSessionUser(cookie);
+    async ({ cookie, body, request }) => {
+      const user = await getSessionUser(
+        cookie,
+        request.headers.get("authorization"),
+      );
       if (!user) throw new HttpError(401, "Not authenticated.");
 
       const username = body.username.trim();
@@ -217,12 +384,17 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       body: t.Object({
         username: t.String({ maxLength: 30 }),
       }),
+      detail: { summary: "Rename user", tags: ["auth"] },
+      response: userResponse,
     },
   )
   .post(
     "/change-password",
-    async ({ cookie, body }) => {
-      const user = await getSessionUser(cookie);
+    async ({ cookie, body, request }) => {
+      const user = await getSessionUser(
+        cookie,
+        request.headers.get("authorization"),
+      );
       if (!user) throw new HttpError(401, "Not authenticated.");
 
       const currentPassword = body.currentPassword;
@@ -243,8 +415,11 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       const passwordHash = await hashPassword(newPassword);
       await db.update(users).set({ passwordHash }).where(sql`${users.id} = ${user.id}`);
 
-      // Revoke every other session so a stolen session can't survive this change.
-      await destroyOtherSessions(cookie, user.id);
+      await destroyOtherSessions(
+        cookie,
+        user.id,
+        request.headers.get("authorization"),
+      );
 
       return { ok: true };
     },
@@ -253,12 +428,17 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
         currentPassword: t.String({ maxLength: 200 }),
         newPassword: t.String({ maxLength: 200 }),
       }),
+      detail: { summary: "Change password", tags: ["auth"] },
+      response: okSchema,
     },
   )
   .post(
     "/delete-account",
-    async ({ cookie, body }) => {
-      const user = await getSessionUser(cookie);
+    async ({ cookie, body, request }) => {
+      const user = await getSessionUser(
+        cookie,
+        request.headers.get("authorization"),
+      );
       if (!user) throw new HttpError(401, "Not authenticated.");
 
       const valid = await verifyPassword(body.password, user.passwordHash);
@@ -275,5 +455,7 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       body: t.Object({
         password: t.String({ maxLength: 200 }),
       }),
+      detail: { summary: "Delete account", tags: ["auth"] },
+      response: okSchema,
     },
   );

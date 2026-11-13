@@ -4,7 +4,8 @@
   "private": true,
   "workspaces": [
     "backend",
-    "frontend"
+    "frontend",
+    "extension"
   ],
   "scripts": {
     "up": "docker compose up -d --build",
@@ -20,8 +21,9 @@
     "dev:web": "bun run --cwd frontend dev",
     "dev": "bun run dev:api & bun run dev:web",
     "build": "bun run --cwd frontend build",
+    "build:extension": "bun run --cwd extension build",
     "start": "bun run --cwd backend start",
-    "typecheck": "bun run --cwd backend typecheck && bun run --cwd frontend typecheck",
+    "typecheck": "bun run --cwd backend typecheck && bun run --cwd frontend typecheck && bun run --cwd extension typecheck",
     "setup": "bun install && docker compose up -d && bun run db:push"
   }
 }

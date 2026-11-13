@@ -99,8 +99,6 @@ export function ProjectPage() {
   const [styleSearchLoading, setStyleSearchLoading] = createSignal(false);
   const [styleSaving, setStyleSaving] = createSignal(false);
 
-  // Virtualized style list: the catalog holds ~11k styles, so only the
-  // visible rows are mounted. Row heights are measured dynamically.
   let styleScrollEl!: HTMLDivElement;
   const styleVirtualizer = createVirtualizer({
     get count() {
@@ -239,8 +237,6 @@ export function ProjectPage() {
     bibliography()?.citations.find((citation) => citation.id === referenceId)
       ?.inText ?? "";
 
-  // Multi-select: checkboxes on each card feed a shared id set, so the
-  // selection bar can copy just those references.
   const [selectedIds, setSelectedIds] = createSignal<Set<string>>(
     new Set<string>(),
   );
@@ -259,8 +255,6 @@ export function ProjectPage() {
     setSelectedIds(new Set<string>());
   }
 
-  // "Select all" targets the currently visible (filtered) references and
-  // shows an indeterminate state for partial selection.
   let selectAllEl!: HTMLInputElement;
 
   function toggleSelectAllVisible(): void {
@@ -287,7 +281,6 @@ export function ProjectPage() {
     selectAllEl.indeterminate = count > 0 && count < visible.length;
   });
 
-  // Selection belongs to one project; drop it when navigating.
   createEffect(() => {
     projectId();
     clearSelection();
@@ -299,8 +292,6 @@ export function ProjectPage() {
     return entries().filter((entry) => selected.has(entry.id));
   }
 
-  // Side panel follows the selection: when anything is checked, the
-  // bibliography and in-text tabs show only the selected references.
   const visibleEntries = createMemo(() => {
     const selected = selectedIds();
     const all = entries();

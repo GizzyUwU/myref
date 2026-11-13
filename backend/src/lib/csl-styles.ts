@@ -2,82 +2,15 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import CSL from "citeproc";
-import { defaultStyleId } from "./csl-defaults";
 import { HttpError } from "./http";
-
-const catalogUrl = "https://www.zotero.org/styles-files/styles.json";
-const styleBaseUrl = "https://www.zotero.org/styles/";
-const localeBaseUrl =
-  "https://raw.githubusercontent.com/citation-style-language/locales/master/";
-const cacheDir = resolve(import.meta.dir, "../../.cache/csl");
-const catalogCachePath = resolve(cacheDir, "styles.json");
-const styleTtlMs = 24 * 60 * 60 * 1000;
-const catalogTtlMs = 6 * 60 * 60 * 1000;
-const defaultLocale = "en-US";
-const featuredStyles = [
-  defaultStyleId,
-  "apa",
-  "modern-language-association",
-  "chicago-author-date",
-  "harvard-cite-them-right",
-  "vancouver",
-  "ieee",
-  "nature",
-  "american-medical-association",
-  "oscola",
-];
-
-
-type CatalogStyle = {
-  name: string;
-  title: string;
-  titleShort?: string;
-  dependent?: number;
-  categories?: {
-    format?: string;
-    fields?: string[];
-  };
-  updated?: string;
-  href?: string;
-};
-
-type CatalogCache = {
-  at: number;
-  styles: CatalogStyle[];
-};
-
-export type CslStyleSummary = {
-  id: string;
-  name: string;
-  title: string;
-  titleShort: string | null;
-  dependent: boolean;
-  format: string | null;
-  fields: string[];
-  updated: string | null;
-  href: string;
-  isDefault: boolean;
-};
-
-export type LoadedCslStyle = {
-  id: string;
-  title: string;
-  xml: string;
-  sourceUrl: string;
-  updated: string | null;
-  locales: Record<string, string>;
-  parentId?: string;
-};
-
-type StyleCacheEntry = {
-  at: number;
-  style: LoadedCslStyle;
-};
-
-type LocaleCacheEntry = {
-  at: number;
-  xml: string;
-};
+import type {
+  CatalogCache,
+  CatalogStyle,
+  CslStyleSummary,
+  LoadedCslStyle,
+  LocaleCacheEntry,
+  StyleCacheEntry,
+} from "./csl-styles.types";
 
 let catalogMemory: CatalogCache | null = null;
 const styleMemory = new Map<string, StyleCacheEntry>();
@@ -128,7 +61,7 @@ function styleInfo(xml: string) {
 }
 
 function localeNames(xml: string): string[] {
-  const names = new Set<string>([defaultLocale]);
+  const names = new Set<string>(["en-US"]);
   const xmlDefaultLocale = xml.match(/\bdefault-locale="([^"]+)"/i)?.[1];
   if (xmlDefaultLocale) names.add(xmlDefaultLocale);
 
@@ -167,19 +100,19 @@ async function readJsonCache<T>(path: string): Promise<T | null> {
 
 async function writeJsonCache(path: string, value: unknown): Promise<void> {
   try {
-    await mkdir(cacheDir, { recursive: true });
+    await mkdir(resolve(import.meta.dir, "../../.cache/csl"), { recursive: true });
     await writeFile(path, JSON.stringify(value));
   } catch {
   }
 }
 
 function styleCachePath(styleId: string): string {
-  return resolve(cacheDir, `style-${styleId}.json`);
+  return resolve(import.meta.dir, "../../.cache/csl", `style-${styleId}.json`);
 }
 
 function localeCachePath(locale: string): string {
-  const safe = locale.replace(/[^a-zA-Z0-9-]/g, "") || defaultLocale;
-  return resolve(cacheDir, `locale-${safe}.json`);
+  const safe = locale.replace(/[^a-zA-Z0-9-]/g, "") || "en-US";
+  return resolve(import.meta.dir, "../../.cache/csl", `locale-${safe}.json`);
 }
 
 function bundledLocale(locale: string): string | null {
@@ -196,13 +129,13 @@ function bundledLocale(locale: string): string | null {
 async function loadCatalog(): Promise<CatalogStyle[]> {
   if (
     catalogMemory &&
-    Date.now() - catalogMemory.at < catalogTtlMs
+    Date.now() - catalogMemory.at < 6 * 60 * 60 * 1000
   ) {
     return catalogMemory.styles;
   }
 
   try {
-    const parsed = JSON.parse(await fetchText(catalogUrl)) as unknown;
+    const parsed = JSON.parse(await fetchText("https://www.zotero.org/styles-files/styles.json")) as unknown;
     if (!Array.isArray(parsed)) throw new Error("Invalid style catalogue");
 
     const styles = parsed.filter(
@@ -214,10 +147,10 @@ async function loadCatalog(): Promise<CatalogStyle[]> {
     );
 
     catalogMemory = { at: Date.now(), styles };
-    await writeJsonCache(catalogCachePath, catalogMemory);
+    await writeJsonCache(resolve(import.meta.dir, "../../.cache/csl", "styles.json"), catalogMemory);
     return styles;
   } catch {
-    const disk = await readJsonCache<CatalogCache>(catalogCachePath);
+    const disk = await readJsonCache<CatalogCache>(resolve(import.meta.dir, "../../.cache/csl", "styles.json"));
     if (disk?.styles?.length) {
       catalogMemory = disk;
       return disk.styles;
@@ -240,8 +173,8 @@ function styleSummary(style: CatalogStyle): CslStyleSummary {
     format: style.categories?.format ?? null,
     fields: style.categories?.fields ?? [],
     updated: style.updated ?? null,
-    href: style.href ?? `${styleBaseUrl}${style.name}`,
-    isDefault: style.name === defaultStyleId,
+    href: style.href ?? `https://www.zotero.org/styles/${style.name}`,
+    isDefault: style.name === "harvard-the-university-of-northampton",
   };
 }
 
@@ -251,8 +184,6 @@ export async function searchCslStyles(
 ): Promise<CslStyleSummary[]> {
   const catalog = await loadCatalog();
   const term = query.trim().toLowerCase();
-  // No explicit cap by default: callers virtualize the list. An explicit
-  // limit is still honored (clamped) for anyone wanting a short list.
   const maxResults =
     limit === undefined
       ? Number.POSITIVE_INFINITY
@@ -284,10 +215,19 @@ export async function searchCslStyles(
       );
     });
   } else {
-    // No query: the whole catalog, featured styles first so the common
-    // choices stay at the top, then alphabetical by title.
     const featured = new Map(
-      featuredStyles.map((id, index) => [id, index]),
+      [
+        "harvard-the-university-of-northampton",
+        "apa",
+        "modern-language-association",
+        "chicago-author-date",
+        "harvard-cite-them-right",
+        "vancouver",
+        "ieee",
+        "nature",
+        "american-medical-association",
+        "oscola",
+      ].map((id, index) => [id, index]),
     );
     const featuredMatches = catalog
       .filter((style) => featured.has(style.name))
@@ -305,7 +245,7 @@ export async function searchCslStyles(
 }
 
 async function loadLocale(locale: string): Promise<string> {
-  const name = locale.trim() || defaultLocale;
+  const name = locale.trim() || "en-US";
 
   const memory = localeMemory.get(name);
   if (memory) return memory.xml;
@@ -317,7 +257,7 @@ async function loadLocale(locale: string): Promise<string> {
   }
 
   try {
-    const xml = await fetchText(`${localeBaseUrl}locales-${name}.xml`);
+    const xml = await fetchText(`https://raw.githubusercontent.com/citation-style-language/locales/master/locales-${name}.xml`);
     const entry = { at: Date.now(), xml };
     localeMemory.set(name, entry);
     await writeJsonCache(localeCachePath(name), entry);
@@ -330,11 +270,11 @@ async function loadLocale(locale: string): Promise<string> {
       return bundled;
     }
 
-    if (name !== defaultLocale) {
-      return loadLocale(defaultLocale);
+    if (name !== "en-US") {
+      return loadLocale("en-US");
     }
 
-    const fallback = bundledLocale(defaultLocale);
+    const fallback = bundledLocale("en-US");
     if (fallback) return fallback;
 
     throw new HttpError(
@@ -363,7 +303,7 @@ function validateStyleRendering(
   const engine = new CSL.Engine(
     {
       retrieveLocale: (lang: string) =>
-        locales[lang] ?? locales[defaultLocale] ?? "",
+        locales[lang] ?? locales["en-US"] ?? "",
       retrieveItem: () => sampleItem,
     },
     xml,
@@ -395,7 +335,7 @@ async function fetchValidatedStyle(
     throw new Error("The CSL style parent chain is too deep.");
   }
 
-  const sourceUrl = `${styleBaseUrl}${styleId}`;
+  const sourceUrl = `https://www.zotero.org/styles/${styleId}`;
   const xml = await fetchText(sourceUrl);
   const info = styleInfo(xml);
 
@@ -455,12 +395,12 @@ export async function loadCslStyle(styleId: string): Promise<LoadedCslStyle> {
   }
 
   const memory = styleMemory.get(id);
-  if (memory && Date.now() - memory.at < styleTtlMs) {
+  if (memory && Date.now() - memory.at < 24 * 60 * 60 * 1000) {
     return memory.style;
   }
 
   const disk = await readJsonCache<StyleCacheEntry>(styleCachePath(id));
-  if (disk?.style?.xml && Date.now() - disk.at < styleTtlMs) {
+  if (disk?.style?.xml && Date.now() - disk.at < 24 * 60 * 60 * 1000) {
     try {
       validateStyleRendering(disk.style.xml, disk.style.locales);
       styleMemory.set(id, disk);
@@ -491,4 +431,3 @@ export async function loadCslStyle(styleId: string): Promise<LoadedCslStyle> {
     );
   }
 }
-

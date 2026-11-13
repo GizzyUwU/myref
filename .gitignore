@@ -8,6 +8,8 @@ dist
 Thumbs.db
 backend/drizzle/
 backend/.cache
+# Built extension output is loadable directly, so keep it tracked.
+!/extension/dist/
 .vite
 .vscode/
 .idea/

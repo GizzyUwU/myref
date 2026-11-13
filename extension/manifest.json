@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "MyRef — Offline References",
+  "version": "1.0.0",
+  "description": "Collect references, build bibliographies and export them. Works fully offline; optionally syncs with your MyRef server.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "MyRef"
+  },
+  "permissions": ["storage", "activeTab", "tabs", "scripting"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "commands": {
+    "save-tab": {
+      "suggested_key": {
+        "default": "Ctrl+Shift+S",
+        "mac": "Command+Shift+S"
+      },
+      "description": "Save the current tab as a reference in the active project"
+    }
+  },
+  "background": {
+    "service_worker": "dist/background.js",
+    "type": "module"
+  }
+}

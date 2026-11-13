@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MyRef</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <span class="logo"><span class="logo-mark">M</span><span>MyRef<span class="logo-dot">.</span></span></span>
+      <div class="topbar-actions">
+        <select id="themeSelect" aria-label="Theme" title="Theme">
+          <option value="light">Light</option>
+          <option value="dracula">Dracula</option>
+          <option value="macchiato">Macchiato</option>
+          <option value="mocha">Mocha</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" id="settingsBtn" type="button">Sync</button>
+      </div>
+    </header>
+
+    
+    <main class="view" id="projectsView">
+      <div class="row space wrap">
+        <div class="grow">
+          <h1>Projects</h1>
+          <p class="subtle">Stored locally. Sync is optional.</p>
+        </div>
+        <select id="projectSort" aria-label="Sort projects" title="Sort projects" style="width: auto; flex: 0 1 auto;">
+          <option value="edited">Last edited</option>
+          <option value="created">Newest</option>
+          <option value="name-az">Name: A to Z</option>
+          <option value="name-za">Name: Z to A</option>
+          <option value="refs">Most references</option>
+        </select>
+        <button class="btn btn-primary btn-sm" id="newProjectBtn" type="button">+ New</button>
+      </div>
+      <div id="projectList" class="row wrap" style="display:grid; gap:8px;"></div>
+    </main>
+
+    
+    <main class="view" id="projectView" hidden>
+      <div class="breadcrumb">
+        <button class="back-link" id="backBtn" type="button">← Projects</button>
+        <span>/</span><span id="crumbName" class="grow" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></span>
+        <span class="count-chip" id="refCount"></span>
+        <button class="back-link" id="setActiveBtn" type="button" title="Project the keyboard shortcut saves new tabs into">☆ Quick-save</button>
+      </div>
+      <div class="row space wrap">
+        <h1 id="projectTitle" class="grow"></h1>
+        <button class="btn btn-primary btn-sm" id="addRefBtn" type="button">+ Reference</button>
+      </div>
+
+      <section class="card">
+        <div class="toolbar">
+          <div class="toolbar-row">
+            <input id="importInput" placeholder="DOI, ISBN, URL — or save current tab" aria-label="Import" />
+          </div>
+          <div class="toolbar-row">
+            <button class="btn btn-ghost btn-sm" id="importBtn" type="button">Import</button>
+            <button class="btn btn-ghost btn-sm" id="saveTabBtn" type="button">Save current tab</button>
+          </div>
+          <div class="toolbar-row">
+            <input id="searchInput" type="search" placeholder="Search title, author, tag…" aria-label="Search" style="flex:2; min-width:140px;" />
+          </div>
+          <div class="toolbar-row">
+            <select id="typeFilter" aria-label="Type filter"></select>
+            <select id="sortSelect" aria-label="Sort">
+              <option value="added-new">Newest first</option>
+              <option value="added-old">Oldest first</option>
+              <option value="author-az">Author A–Z</option>
+              <option value="pub-new">Published: newest</option>
+              <option value="pub-old">Published: oldest</option>
+              <option value="title-az">Title A–Z</option>
+            </select>
+          </div>
+        </div>
+        <div class="selection-bar" id="selectionBar" hidden>
+          <span class="count-chip" id="selCount"></span>
+          <button class="btn btn-primary btn-sm" id="copyBibSel" type="button">Copy</button>
+          <button class="btn btn-ghost btn-sm" id="dupSel" type="button">Duplicate</button>
+          <button class="btn btn-danger btn-sm" id="delSel" type="button">Delete</button>
+          <button class="btn btn-ghost btn-sm" id="clearSel" type="button">Clear</button>
+        </div>
+        <div id="refList"></div>
+      </section>
+
+      <section class="card" style="padding:12px; display:grid; gap:8px;">
+        <div class="row space">
+          <h2 style="margin:0; font-size:0.92rem;">References</h2>
+          <button class="style-chip style-chip-button" id="styleBtn" type="button" title="Citation style — click to change">Harvard</button>
+        </div>
+        <div class="tabs" role="tablist">
+          <button type="button" id="tabBib" class="active">Bibliography</button>
+          <button type="button" id="tabCite">In-text</button>
+        </div>
+        <div id="bibBody"></div>
+        <div class="row wrap">
+          <select id="exportFormat" style="width:auto; flex:1;" aria-label="Export format">
+            <option value="text">.txt</option>
+            <option value="html">.html</option>
+            <option value="ris">.ris</option>
+            <option value="bibtex">.bib</option>
+          </select>
+          <button class="btn btn-primary btn-sm" id="copyAllBtn" type="button">Copy all</button>
+          <button class="btn btn-ghost btn-sm" id="downloadBtn" type="button">Download</button>
+        </div>
+      </section>
+    </main>
+
+    
+    <main class="view" id="settingsView" hidden>
+      <div class="breadcrumb">
+        <button class="back-link" id="settingsBack" type="button">← Back</button>
+      </div>
+      <h1>Sync &amp; settings</h1>
+      <p class="subtle">Everything works offline. Log in once and the extension keeps only an API token — never your password — then syncs automatically.</p>
+      <section class="card" style="padding:12px; display:grid; gap:8px;">
+        <div class="field">
+          <label class="field-label" for="serverUrl">Server URL (optional)</label>
+          <input id="serverUrl" placeholder="https://myref.example.com" />
+        </div>
+        <div class="form-grid">
+          <div class="field"><label class="field-label" for="syncUser">Username</label><input id="syncUser" autocomplete="username" /></div>
+          <div class="field"><label class="field-label" for="syncPass">Password</label><input id="syncPass" type="password" autocomplete="current-password" /></div>
+        </div>
+        <div class="row wrap">
+          <button class="btn btn-primary btn-sm" id="loginBtn" type="button">Connect</button>
+          <button class="btn btn-ghost btn-sm" id="logoutBtn" type="button">Disconnect</button>
+        </div>
+        <p class="subtle" id="syncStatus">Not connected.</p>
+        <p class="subtle small" id="quickSaveInfo"></p>
+        <div class="row wrap">
+          <button class="btn btn-ghost btn-sm" id="pullBtn" type="button">Pull from server</button>
+          <button class="btn btn-ghost btn-sm" id="pushBtn" type="button">Push to server</button>
+        </div>
+        <p class="subtle small">Log in once — only a revocable API token is stored on this device. Or create a token under Settings on the site and paste it below.</p>
+        <div class="field">
+          <label class="field-label" for="apiKey">API key (alternative to logging in)</label>
+          <div class="toolbar-row">
+            <input id="apiKey" type="password" placeholder="myref_…" autocomplete="off" style="flex: 2; min-width: 140px;" />
+            <button class="btn btn-ghost btn-sm" id="useKeyBtn" type="button">Use key</button>
+          </div>
+        </div>
+      </section>
+      <section class="card" style="padding:12px; display:grid; gap:8px;">
+        <div class="field">
+          <span class="field-label">Keyboard shortcuts</span>
+          <p class="subtle small">Global shortcuts work even when the popup is closed. Chrome does not let extensions rebind them directly — copy the address below, paste it into the address bar, and change them there. (Firefox: Add-ons → ⚙ → Manage Extension Shortcuts.)</p>
+        </div>
+        <div id="shortcutList" style="display:grid; gap:6px;"></div>
+        <div class="row wrap">
+          <button class="btn btn-ghost btn-sm" id="editShortcutsBtn" type="button">Copy shortcuts page address</button>
+        </div>
+        <div class="field">
+          <span class="field-label">Popup shortcuts (fixed)</span>
+          <p class="subtle small"><span class="tag">/</span> focuses search · <span class="tag">Esc</span> closes dialogs / goes back</p>
+        </div>
+      </section>
+      <section class="card" style="padding:12px; display:grid; gap:8px;">
+        <div class="field">
+          <label class="field-label" for="dangerZone">Data</label>
+          <div class="row wrap">
+            <button class="btn btn-ghost btn-sm" id="exportAllBtn" type="button">Export all (JSON)</button>
+            <button class="btn btn-danger btn-sm" id="wipeBtn" type="button">Delete all local data</button>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    
+    <div class="modal-overlay" id="projectModal" hidden>
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header"><h2 id="projectModalTitle">New project</h2></div>
+        <div class="modal-body">
+          <div class="field"><label class="field-label">Name</label><input id="projName" maxlength="120" /></div>
+          <div class="field"><label class="field-label">Description</label><textarea id="projDesc" rows="2" maxlength="500"></textarea></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="projCancel" type="button">Cancel</button>
+          <button class="btn btn-primary" id="projSave" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="modal-overlay" id="styleModal" hidden>
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <h2>Citation style</h2>
+            <p class="subtle">Bundled styles work offline. Connect the server to search all 10,000+ CSL styles.</p>
+          </div>
+          <button type="button" class="icon-button" id="styleClose" aria-label="Close">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="search-wrap">
+            <input id="styleQuery" type="search" placeholder="Search styles" aria-label="Search citation styles" />
+          </div>
+          <div class="style-list" id="styleList"></div>
+        </div>
+      </div>
+    </div>
+
+    
+    <div class="modal-overlay" id="refModal" hidden>
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header"><h2 id="refModalTitle">New reference</h2></div>
+        <div class="modal-body">
+          <div class="form-error" id="refError" hidden></div>
+          <div class="form-grid">
+            <div class="field"><label class="field-label">Type</label><select id="fType"></select></div>
+            <div class="field"><label class="field-label">Year</label><input id="fYear" maxlength="20" placeholder="2024" /></div>
+            <div class="field span-2"><label class="field-label">Title *</label><input id="fTitle" maxlength="1000" /></div>
+            <div class="field span-2"><label class="field-label">Authors (one per line: Family, Given)</label><textarea id="fAuthors" rows="2" placeholder="Smith, Jane"></textarea></div>
+            <div class="field span-2"><label class="field-label">Editors (one per line)</label><textarea id="fEditors" rows="1" placeholder=""></textarea></div>
+            <div class="field span-2"><label class="field-label">Container (journal / book / site)</label><input id="fContainer" maxlength="1000" /></div>
+            <div class="field"><label class="field-label">Publisher</label><input id="fPublisher" maxlength="500" /></div>
+            <div class="field"><label class="field-label">Place</label><input id="fPlace" maxlength="500" /></div>
+            <div class="field"><label class="field-label">Volume</label><input id="fVolume" maxlength="50" /></div>
+            <div class="field"><label class="field-label">Issue</label><input id="fIssue" maxlength="50" /></div>
+            <div class="field"><label class="field-label">Pages</label><input id="fPages" maxlength="100" placeholder="12–28" /></div>
+            <div class="field"><label class="field-label">Edition</label><input id="fEdition" maxlength="100" /></div>
+            <div class="field"><label class="field-label">DOI</label><input id="fDoi" maxlength="500" /></div>
+            <div class="field"><label class="field-label">URL</label><input id="fUrl" maxlength="2000" /></div>
+            <div class="field"><label class="field-label">Accessed (YYYY-MM-DD)</label><input id="fAccessed" maxlength="10" placeholder="2024-01-31" /></div>
+            <div class="field"><label class="field-label">Published date</label><input id="fPubdate" maxlength="100" /></div>
+            <div class="field span-2"><label class="field-label">Tags (comma separated)</label><input id="fTags" maxlength="500" /></div>
+            <div class="field span-2"><label class="field-label">Notes</label><textarea id="fNotes" rows="2" maxlength="5000"></textarea></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="refCancel" type="button">Cancel</button>
+          <button class="btn btn-primary" id="refSave" type="button">Save</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="toast-stack" id="toasts"></div>
+    <script src="./vendor/citeproc.js"></script>
+    <script type="module" src="./dist/app.js"></script>
+  </body>
+</html>

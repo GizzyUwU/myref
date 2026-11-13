@@ -10,7 +10,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 
-export const REFERENCE_TYPES = [
+export const referenceTypes = [
   "book",
   "chapter",
   "journal",
@@ -22,7 +22,7 @@ export const REFERENCE_TYPES = [
   "other",
 ] as const;
 
-export type ReferenceType = (typeof REFERENCE_TYPES)[number];
+export type ReferenceType = (typeof referenceTypes)[number];
 
 export type Author = {
   family: string;
@@ -133,6 +133,65 @@ export const references = pgTable(
     index("references_project_idx").on(table.projectId),
     index("references_user_idx").on(table.userId),
   ],
+);
+
+export const projectMembers = pgTable(
+  "project_members",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [
+    uniqueIndex("project_members_project_user_unique").on(
+      table.projectId,
+      table.userId,
+    ),
+    index("project_members_user_idx").on(table.userId),
+  ],
+);
+
+export const projectShareCodes = pgTable(
+  "project_share_codes",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    projectId: uuid("project_id")
+      .notNull()
+      .references(() => projects.id, { onDelete: "cascade" }),
+    codeHash: text("code_hash").notNull().unique(),
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (table) => [index("project_share_codes_project_idx").on(table.projectId)],
+);
+
+export const apiTokens = pgTable(
+  "api_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    tokenHash: text("token_hash").notNull().unique(),
+    name: text("name").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+  },
+  (table) => [index("api_tokens_user_idx").on(table.userId)],
 );
 
 export type User = typeof users.$inferSelect;

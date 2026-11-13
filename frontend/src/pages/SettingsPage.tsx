@@ -1,7 +1,14 @@
 import { A, Navigate, useNavigate } from "@solidjs/router";
-import { createEffect, createSignal, Show } from "solid-js";
+import {
+  createEffect,
+  createResource,
+  createSignal,
+  For,
+  Show,
+} from "solid-js";
 import { api, ApiError } from "../api";
 import { AppShell } from "../components/AppShell";
+import { formatDate } from "../format";
 import { auth } from "../store/auth";
 import { themeLabels, themes, themeStore, type Theme } from "../store/theme";
 import { toast } from "../store/toast";
@@ -113,6 +120,64 @@ export function SettingsPage() {
     }
   }
 
+  const [tokens, { refetch: refetchTokens }] = createResource(async () => {
+    try {
+      return (await api.listTokens()).tokens;
+    } catch {
+      return [];
+    }
+  });
+  const [tokenName, setTokenName] = createSignal("");
+  const [tokenCreating, setTokenCreating] = createSignal(false);
+  const [freshToken, setFreshToken] = createSignal<string | null>(null);
+
+  async function createToken(event: Event) {
+    event.preventDefault();
+    setTokenCreating(true);
+    try {
+      const result = await api.createToken(
+        tokenName().trim() ? { name: tokenName().trim() } : {},
+      );
+      setFreshToken(result.token.token);
+      setTokenName("");
+      toast("API token created.", "success");
+      void refetchTokens();
+    } catch (caught) {
+      toast(
+        caught instanceof ApiError ? caught.message : "Could not create token.",
+        "error",
+      );
+    } finally {
+      setTokenCreating(false);
+    }
+  }
+
+  async function revokeToken(id: string, name: string) {
+    const confirmed = window.confirm(
+      `Revoke the API token "${name || "unnamed"}"? Clients using it will stop syncing.`,
+    );
+    if (!confirmed) return;
+    try {
+      await api.revokeToken(id);
+      toast("Token revoked.", "success");
+      void refetchTokens();
+    } catch (caught) {
+      toast(
+        caught instanceof ApiError ? caught.message : "Could not revoke token.",
+        "error",
+      );
+    }
+  }
+
+  async function copyToken(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast("Token copied.", "success");
+    } catch {
+      toast("Could not copy to the clipboard.", "error");
+    }
+  }
+
   return (
     <Show when={auth.user()} fallback={<Navigate href="/login" />}>
       <AppShell>
@@ -122,7 +187,7 @@ export function SettingsPage() {
               ← Back to projects
             </A>
             <h1>Account settings</h1>
-            <p class="subtle">Manage your profile, password and account.</p>
+            <p class="subtle">Manage your profile, password, API tokens and account.</p>
           </div>
         </div>
 
@@ -228,6 +293,106 @@ export function SettingsPage() {
                 {changeLoading() ? "Updating..." : "Change password"}
               </button>
             </form>
+          </section>
+
+          <section class="panel">
+            <header class="panel-header">
+              <div>
+                <h2>API tokens</h2>
+                <p class="panel-subtitle">
+                  For the browser extension and scripts. Tokens act as your
+                  account — keep them secret.
+                </p>
+              </div>
+            </header>
+            <div class="settings-form">
+              <Show when={freshToken()}>
+                {(value) => (
+                  <>
+                    <p class="form-error" style="background: var(--accent-soft); border-color: var(--border); color: var(--ink);">
+                      Copy it now — this token will not be shown again.
+                    </p>
+                    <div style="display: flex; gap: 8px;">
+                      <input type="text" readonly value={value()} style="flex: 1; min-width: 0;" />
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        onClick={() => void copyToken(value())}
+                      >
+                        Copy
+                      </button>
+                      <button
+                        type="button"
+                        class="btn btn-ghost btn-sm"
+                        onClick={() => setFreshToken(null)}
+                      >
+                        Done
+                      </button>
+                    </div>
+                  </>
+                )}
+              </Show>
+
+              <form
+                onSubmit={createToken}
+                style="display: flex; gap: 8px; align-items: end;"
+              >
+                <label class="field" style="flex: 1; min-width: 0;">
+                  <span class="field-label">New token name</span>
+                  <input
+                    type="text"
+                    value={tokenName()}
+                    onInput={(e) => setTokenName(e.currentTarget.value)}
+                    maxlength={100}
+                    placeholder="Browser extension"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  class="btn btn-primary btn-sm"
+                  disabled={tokenCreating()}
+                >
+                  {tokenCreating() ? "Creating..." : "Create"}
+                </button>
+              </form>
+
+              <Show when={tokens.loading}>
+                <p class="subtle small">Loading tokens…</p>
+              </Show>
+              <Show when={!tokens.loading && (tokens() ?? []).length === 0}>
+                <p class="subtle small">
+                  No tokens yet — create one above and paste it into the
+                  extension, or log in from the extension once.
+                </p>
+              </Show>
+              <For each={tokens() ?? []}>
+                {(token) => (
+                  <div
+                    class="citation-row"
+                    style="align-items: center;"
+                  >
+                    <div style="min-width: 0;">
+                      <div style="font-weight: 650;">
+                        {token.name || "Unnamed token"}
+                      </div>
+                      <div class="subtle small">
+                        Created {formatDate(token.createdAt)}
+                        {token.lastUsedAt
+                          ? ` · Last used ${formatDate(token.lastUsedAt)}`
+                          : " · Never used"}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      class="btn btn-danger btn-sm"
+                      onClick={() => void revokeToken(token.id, token.name)}
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                )}
+              </For>
+            </div>
           </section>
 
           <section class="panel danger-panel">

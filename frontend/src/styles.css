@@ -13,7 +13,6 @@
   --danger-border: #fecaca;
   --ok: #047857;
   --shadow: 0 1px 2px rgba(20, 24, 35, 0.04);
-  --glow: radial-gradient(1200px 800px at 100% -10%, #eef2ff 0%, transparent 60%);
   --topbar-bg: rgba(246, 247, 251, 0.84);
   --placeholder: #9aa1b1;
   --on-accent: #ffffff;
@@ -36,7 +35,6 @@
   --danger-border: #6e2f33;
   --ok: #50fa7b;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --glow: radial-gradient(1200px 800px at 100% -10%, rgba(189, 147, 249, 0.12) 0%, transparent 60%);
   --topbar-bg: rgba(40, 42, 54, 0.84);
   --placeholder: #6272a4;
   --on-accent: #282a36;
@@ -59,7 +57,6 @@
   --danger-border: #5f3440;
   --ok: #a6da95;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --glow: radial-gradient(1200px 800px at 100% -10%, rgba(138, 173, 244, 0.1) 0%, transparent 60%);
   --topbar-bg: rgba(36, 39, 58, 0.84);
   --placeholder: #6e738d;
   --on-accent: #181926;
@@ -82,7 +79,6 @@
   --danger-border: #66303e;
   --ok: #a6e3a1;
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --glow: radial-gradient(1200px 800px at 100% -10%, rgba(137, 180, 250, 0.1) 0%, transparent 60%);
   --topbar-bg: rgba(30, 30, 46, 0.84);
   --placeholder: #6c7086;
   --on-accent: #11111b;
@@ -108,9 +104,7 @@ body {
     "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
     Helvetica, Arial, sans-serif;
   color: var(--ink);
-  background:
-    var(--glow),
-    var(--bg);
+  background: var(--bg);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
@@ -164,9 +158,9 @@ textarea:focus {
   border-radius: 10px;
   display: grid;
   place-items: center;
-  color: #fff;
-  background: linear-gradient(135deg, #6366f1, #4338ca);
-  box-shadow: 0 6px 14px -6px rgba(67, 56, 202, 0.65);
+  color: var(--on-accent);
+  background: var(--accent);
+  box-shadow: none;
 }
 
 .logo-dot {
@@ -520,30 +514,7 @@ select {
   gap: 40px;
   padding: 52px 64px;
   color: #eef2ff;
-  background:
-    radial-gradient(900px 600px at 18% 0%, #4f46e5 0%, #312e81 46%, #1e1b4b 100%);
-}
-
-.auth-brand::before {
-  content: "";
-  position: absolute;
-  width: 520px;
-  height: 520px;
-  border-radius: 50%;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  top: -170px;
-  right: -180px;
-}
-
-.auth-brand::after {
-  content: "";
-  position: absolute;
-  width: 380px;
-  height: 380px;
-  border-radius: 50%;
-  background: rgba(255, 255, 255, 0.055);
-  right: -110px;
-  bottom: -150px;
+  background: #1e1b4b;
 }
 
 .auth-brand > * {
@@ -724,8 +695,8 @@ select {
   border-radius: 50%;
   display: grid;
   place-items: center;
-  background: linear-gradient(135deg, #6366f1, #4338ca);
-  color: #fff;
+  background: var(--accent);
+  color: var(--on-accent);
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -1792,8 +1763,6 @@ ref-panel,
     bottom: 16px;
   }
 }
-
-/* --- Dark themes: re-tint light-only accents --- */
 
 [data-theme="macchiato"] .type-book { background: rgba(138, 173, 244, 0.15); color: #8aadf4; }
 [data-theme="macchiato"] .type-chapter { background: rgba(245, 169, 127, 0.15); color: #f5a97f; }

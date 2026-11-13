@@ -7,32 +7,15 @@ import { normalizeDoi } from "../lib/format";
 import { badRequest, HttpError, notFound } from "../lib/http";
 import { checkRateLimit, clientIp } from "../lib/rate-limit";
 import { requireUser } from "../lib/session";
+import { errorResponse, lookupResultSchema } from "../lib/api-schemas";
+import type {
+  CrossrefMessage,
+  CrossrefPerson,
+  CrossrefResponse,
+  OpenLibraryResponse,
+} from "./lookup.types";
 
-type CrossrefMessage = {
-  type?: string;
-  title?: string[];
-  "container-title"?: string[];
-  author?: Array<{ family?: string; given?: string; name?: string }>;
-  editor?: Array<{ family?: string; given?: string; name?: string }>;
-  issued?: { "date-parts"?: number[][] };
-  "published-print"?: { "date-parts"?: number[][] };
-  "published-online"?: { "date-parts"?: number[][] };
-  created?: { "date-parts"?: number[][] };
-  volume?: string;
-  issue?: string;
-  page?: string;
-  publisher?: string;
-  DOI?: string;
-  URL?: string;
-  edition?: string;
-  ISBN?: string[];
-};
-
-function toAuthor(entry: {
-  family?: string;
-  given?: string;
-  name?: string;
-}): Author {
+function toAuthor(entry: CrossrefPerson): Author {
   const family = (entry.family ?? entry.name ?? "").trim();
   return { family, given: (entry.given ?? "").trim() };
 }
@@ -118,27 +101,23 @@ function splitName(name: string): Author {
   };
 }
 
-// --- SSRF protection for the /lookup/url fetcher ---
-
-const MAX_REDIRECTS = 5;
-
 function isBlockedIPv4(octets: [number, number, number, number]): boolean {
   const [a, b, c, d] = octets;
-  if (a === 10) return true; // 10.0.0.0/8
-  if (a === 172 && b >= 16 && b <= 31) return true; // 172.16.0.0/12
-  if (a === 192 && b === 168) return true; // 192.168.0.0/16
-  if (a === 127) return true; // 127.0.0.0/8 loopback
-  if (a === 169 && b === 254) return true; // 169.254.0.0/16 link-local (cloud metadata)
-  if (a === 0) return true; // 0.0.0.0/8
-  if (a === 100 && b >= 64 && b <= 127) return true; // 100.64.0.0/10 CGNAT
-  if (a === 192 && b === 0 && c === 0) return true; // 192.0.0.0/24 protocol assignments
-  if (a === 192 && b === 0 && c === 2) return true; // 192.0.2.0/24 TEST-NET-1
-  if (a === 192 && b === 88 && c === 99) return true; // 192.88.99.0/24 6to4 relay
-  if (a === 198 && (b === 18 || b === 19)) return true; // 198.18.0.0/15 benchmarking
-  if (a === 198 && b === 51 && c === 100) return true; // 198.51.100.0/24 TEST-NET-2
-  if (a === 203 && b === 0 && c === 113) return true; // 203.0.113.0/24 TEST-NET-3
-  if (a >= 224 && a <= 239) return true; // 224.0.0.0/4 multicast
-  if (a >= 240) return true; // 240.0.0.0/4 reserved + broadcast
+  if (a === 10) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 0) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 192 && b === 0 && c === 0) return true;
+  if (a === 192 && b === 0 && c === 2) return true;
+  if (a === 192 && b === 88 && c === 99) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  if (a === 198 && b === 51 && c === 100) return true;
+  if (a === 203 && b === 0 && c === 113) return true;
+  if (a >= 224 && a <= 239) return true;
+  if (a >= 240) return true;
   void d;
   return false;
 }
@@ -153,7 +132,6 @@ function parseIPv4Bytes(ip: string): [number, number, number, number] | null {
     if (/^0x[0-9a-fA-F]+$/.test(part)) {
       value = parseInt(part, 16);
     } else if (/^0[0-9]+$/.test(part)) {
-      // Leading zero: treat as octal (classic getaddrinfo behavior).
       if (!/^[0-7]+$/.test(part.slice(1))) return null;
       value = parseInt(part, 8);
     } else if (/^[0-9]+$/.test(part)) {
@@ -167,8 +145,6 @@ function parseIPv4Bytes(ip: string): [number, number, number, number] | null {
   return octets as [number, number, number, number];
 }
 
-/** Parse an IPv4 address written in non-standard forms (bare integer,
- *  hex, octal, or fewer than 4 dotted parts). Returns dotted-decimal or null. */
 export function normalizeObscuredIPv4(host: string): string | null {
   const h = host.trim();
   if (!h || h.includes(":") || /[^0-9a-fA-FxX.]/.test(h)) return null;
@@ -211,7 +187,6 @@ export function normalizeObscuredIPv4(host: string): string | null {
 
 function parseIPv6Bytes(ip: string): number[] | null {
   let addr = ip.toLowerCase();
-  // Handle embedded IPv4 tail (e.g. ::ffff:192.0.2.1).
   const v4Tail = addr.match(/:(\d+\.\d+\.\d+\.\d+)$/);
   if (v4Tail) {
     const bytes = parseIPv4Bytes(v4Tail[1]!);
@@ -269,7 +244,6 @@ export function isBlockedIP(ip: string): boolean {
   }
   if (version === 6) {
     const lower = ip.toLowerCase();
-    // IPv4-mapped (both dotted and hex forms): judge by the embedded IPv4.
     const mappedV4 = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
     if (mappedV4) {
       const bytes = parseIPv4Bytes(mappedV4[1]!);
@@ -278,16 +252,11 @@ export function isBlockedIP(ip: string): boolean {
     }
     const bytes = parseIPv6Bytes(lower);
     if (!bytes) return true;
-    // ::1 loopback, :: unspecified
     if (bytes.every((b) => b === 0)) return true;
     if (bytes.slice(0, 15).every((b) => b === 0) && bytes[15] === 1) return true;
-    // fe80::/10 link-local
     if (bytes[0] === 0xfe && (bytes[1] & 0xc0) === 0x80) return true;
-    // fc00::/7 unique local
     if ((bytes[0] & 0xfe) === 0xfc) return true;
-    // ff00::/8 multicast
     if (bytes[0] === 0xff) return true;
-    // ::ffff:0:0/96 hex form wrapping an IPv4 address
     if (
       bytes.slice(0, 10).every((b) => b === 0) &&
       bytes[10] === 0xff &&
@@ -301,10 +270,8 @@ export function isBlockedIP(ip: string): boolean {
       ];
       return isBlockedIPv4(inner);
     }
-    // 2001:db8::/32 documentation
     if (bytes[0] === 0x20 && bytes[1] === 0x01 && bytes[2] === 0x0d && bytes[3] === 0xb8)
       return true;
-    // 64:ff9b::/96 NAT64 well-known prefix + 100::/64 discard
     if (
       bytes[0] === 0x00 &&
       bytes[1] === 0x64 &&
@@ -318,18 +285,15 @@ export function isBlockedIP(ip: string): boolean {
   return true;
 }
 
-/** Resolve a hostname and reject it unless every address is public. */
 export async function assertHostnameIsPublic(hostname: string): Promise<void> {
   let host = hostname.toLowerCase();
   if (host.endsWith(".")) host = host.slice(0, -1);
   if (!host) badRequest("Enter a valid URL.");
 
-  // Literal IP: no DNS needed.
   if (isIP(host)) {
     if (isBlockedIP(host)) badRequest("That URL is not allowed.");
     return;
   }
-  // Numeric obfuscations of IPv4 (e.g. http://2130706433/).
   const deobfuscated = normalizeObscuredIPv4(host);
   if (deobfuscated) {
     if (isBlockedIP(deobfuscated)) badRequest("That URL is not allowed.");
@@ -362,27 +326,21 @@ export function assertUrlShapeIsAllowed(parsed: URL): void {
   }
 }
 
-const LOOKUP_RATE_LIMIT = 30;
-const LOOKUP_RATE_WINDOW_MS = 60_000;
-
-/** Per-IP cap on metadata lookups; each one costs outbound fetches. Returns
- *  retry info when the caller should answer 429, or null to proceed. */
 function lookupLimit(
   request: Request,
   server: unknown,
 ): { retryAfter: number } | null {
   const limit = checkRateLimit(
     `lookup:${clientIp(request, server, env.trustProxy)}`,
-    LOOKUP_RATE_LIMIT,
-    LOOKUP_RATE_WINDOW_MS,
+    30,
+    60_000,
   );
   return limit.allowed ? null : { retryAfter: limit.retryAfter };
 }
 
-/** Fetch with per-hop SSRF checks; redirects are followed manually. */
 export async function fetchUrlWithSsrfChecks(startUrl: string): Promise<Response> {
   let current = startUrl;
-  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+  for (let hop = 0; hop <= 5; hop++) {
     let parsed: URL;
     try {
       parsed = new URL(current);
@@ -412,7 +370,7 @@ export async function fetchUrlWithSsrfChecks(startUrl: string): Promise<Response
       if (!location) {
         throw new HttpError(502, "Could not fetch metadata from that URL.");
       }
-      if (hop === MAX_REDIRECTS) {
+      if (hop === 5) {
         throw new HttpError(502, "Too many redirects.");
       }
       current = new URL(location, current).toString();
@@ -434,7 +392,7 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
         return { error: "Too many lookups. Try again later." };
       }
 
-      await requireUser(cookie);
+      await requireUser(cookie, request.headers.get("authorization"));
 
       const doi = normalizeDoi(query.doi ?? "");
       if (!doi) badRequest("Enter a DOI.");
@@ -457,9 +415,7 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
         throw new HttpError(502, "Crossref could not look up that DOI.");
       }
 
-      const payload = (await response.json()) as {
-        message?: CrossrefMessage;
-      };
+      const payload = (await response.json()) as CrossrefResponse;
       const message = payload.message;
       if (!message) notFound("No record found for that DOI.");
 
@@ -502,6 +458,15 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
       query: t.Object({
         doi: t.Optional(t.String({ maxLength: 500 })),
       }),
+      detail: {
+        summary: "Lookup by DOI",
+        description: "Crossref metadata prefilled as a reference draft.",
+        tags: ["lookup"],
+      },
+      response: {
+        200: lookupResultSchema,
+        429: errorResponse,
+      },
     },
   )
   .get(
@@ -514,7 +479,7 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
         return { error: "Too many lookups. Try again later." };
       }
 
-      await requireUser(cookie);
+      await requireUser(cookie, request.headers.get("authorization"));
 
       const isbn = (query.isbn ?? "").replace(/[^0-9Xx]/g, "");
       if (isbn.length < 10) badRequest("Enter a valid ISBN.");
@@ -536,18 +501,7 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
         throw new HttpError(502, "Open Library could not look up that ISBN.");
       }
 
-      const payload = (await response.json()) as Record<
-        string,
-        {
-          title?: string;
-          subtitle?: string;
-          authors?: Array<{ name?: string }>;
-          publishers?: Array<{ name?: string }>;
-          publish_places?: Array<{ name?: string }>;
-          publish_date?: string;
-          url?: string;
-        }
-      >;
+      const payload = (await response.json()) as OpenLibraryResponse;
 
       const book = payload[`ISBN:${isbn}`];
       if (!book?.title) notFound("No record found for that ISBN.");
@@ -585,6 +539,15 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
       query: t.Object({
         isbn: t.Optional(t.String({ maxLength: 30 })),
       }),
+      detail: {
+        summary: "Lookup by ISBN",
+        description: "Open Library metadata prefilled as a reference draft.",
+        tags: ["lookup"],
+      },
+      response: {
+        200: lookupResultSchema,
+        429: errorResponse,
+      },
     },
   )
   .get(
@@ -597,7 +560,7 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
         return { error: "Too many lookups. Try again later." };
       }
 
-      await requireUser(cookie);
+      await requireUser(cookie, request.headers.get("authorization"));
 
       const url = (query.url ?? "").trim();
       if (!url) badRequest("Enter a URL.");
@@ -737,5 +700,14 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
       query: t.Object({
         url: t.Optional(t.String({ maxLength: 2000 })),
       }),
+      detail: {
+        summary: "Lookup by URL",
+        description: "Page metadata scraped prefilled as a reference draft.",
+        tags: ["lookup"],
+      },
+      response: {
+        200: lookupResultSchema,
+        429: errorResponse,
+      },
     },
   );

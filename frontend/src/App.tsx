@@ -3,8 +3,6 @@ import { lazy, onMount, Show } from "solid-js";
 import { Logo } from "./components/Brand";
 import { auth } from "./store/auth";
 
-// Route-split: each page becomes its own chunk so first paint only
-// downloads the shell + router + the page actually visited.
 const DashboardPage = lazy(() =>
   import("./pages/DashboardPage").then((m) => ({ default: m.DashboardPage })),
 );

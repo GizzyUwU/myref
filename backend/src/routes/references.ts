@@ -4,11 +4,10 @@ import { encode } from "he";
 import sanitize from "sanitize-filename";
 import { db } from "../db";
 import {
-  REFERENCE_TYPES,
+  referenceTypes,
   references,
   projects,
   type Author,
-  type NewReference,
   type ReferenceType,
 } from "../db/schema";
 import { loadCslStyle } from "../lib/csl-styles";
@@ -21,15 +20,25 @@ import {
   sortReferences,
 } from "../lib/format";
 import { badRequest, notFound } from "../lib/http";
-import { getOwnedProject, isUuid } from "../lib/projects";
+import {
+  accessibleProjectIds,
+  getAccessibleProject,
+  isUuid,
+} from "../lib/projects";
 import { requireUser } from "../lib/session";
+import type { ReferenceInput, ReferenceValues } from "./references.types";
+import {
+  bibliographySchema,
+  okSchema,
+  referenceSchema,
+} from "../lib/api-schemas";
 
 const authorInput = t.Object({
   family: t.String({ maxLength: 300 }),
   given: t.Optional(t.String({ maxLength: 300 })),
 });
 
-const referenceInput = t.Object({
+export const referenceInput = t.Object({
   type: t.Optional(t.String({ maxLength: 30 })),
   title: t.Optional(t.String({ maxLength: 1000 })),
   authors: t.Optional(t.Array(authorInput, { maxItems: 100 })),
@@ -50,9 +59,6 @@ const referenceInput = t.Object({
   tags: t.Optional(t.Array(t.String({ maxLength: 100 }), { maxItems: 50 })),
 });
 
-type ReferenceInput = typeof referenceInput.static;
-type ReferenceValues = Omit<NewReference, "projectId" | "userId">;
-
 function clean(value: string | undefined | null): string {
   return (value ?? "").trim();
 }
@@ -71,7 +77,7 @@ function normalizeInput(body: ReferenceInput): ReferenceValues {
   if (!title) badRequest("A title is required.");
 
   const rawType = clean(body.type) || "book";
-  const type = (REFERENCE_TYPES as readonly string[]).includes(rawType)
+  const type = (referenceTypes as readonly string[]).includes(rawType)
     ? (rawType as ReferenceType)
     : "book";
 
@@ -116,9 +122,12 @@ function escapeHtml(value: string): string {
 export const referenceRoutes = new Elysia()
   .get(
     "/projects/:projectId/references",
-    async ({ params, query, cookie }) => {
-      const user = await requireUser(cookie);
-      const project = await getOwnedProject(user.id, params.projectId);
+    async ({ params, query, cookie, request }) => {
+      const user = await requireUser(cookie, request.headers.get("authorization"));
+      const { project } = await getAccessibleProject(
+        user.id,
+        params.projectId,
+      );
 
       const conditions: SQL[] = [eq(references.projectId, project.id)];
 
@@ -131,7 +140,7 @@ export const referenceRoutes = new Elysia()
       }
 
       const type = (query.type ?? "").trim();
-      if (type && (REFERENCE_TYPES as readonly string[]).includes(type)) {
+      if (type && (referenceTypes as readonly string[]).includes(type)) {
         conditions.push(eq(references.type, type as ReferenceType));
       }
 
@@ -148,13 +157,24 @@ export const referenceRoutes = new Elysia()
         q: t.Optional(t.String({ maxLength: 200 })),
         type: t.Optional(t.String({ maxLength: 30 })),
       }),
+      detail: {
+        summary: "List references",
+        description: "Extension pullMerge() syncs this list per project.",
+        tags: ["references"],
+      },
+      response: t.Object({
+        references: t.Array(referenceSchema),
+      }),
     },
   )
   .post(
     "/projects/:projectId/references",
-    async ({ body, params, cookie }) => {
-      const user = await requireUser(cookie);
-      const project = await getOwnedProject(user.id, params.projectId);
+    async ({ body, params, cookie, request }) => {
+      const user = await requireUser(cookie, request.headers.get("authorization"));
+      const { project } = await getAccessibleProject(
+        user.id,
+        params.projectId,
+      );
       const values = normalizeInput(body);
 
       const [reference] = await db
@@ -171,23 +191,32 @@ export const referenceRoutes = new Elysia()
 
       return { reference };
     },
-    { body: referenceInput },
+    {
+      body: referenceInput,
+      detail: {
+        summary: "Create reference",
+        description: "Extension pushAll() creates server rows with this endpoint.",
+        tags: ["references"],
+      },
+      response: t.Object({
+        reference: referenceSchema,
+      }),
+    },
   )
   .patch(
     "/references/:id",
-    async ({ body, params, cookie }) => {
-      const user = await requireUser(cookie);
+    async ({ body, params, cookie, request }) => {
+      const user = await requireUser(cookie, request.headers.get("authorization"));
       if (!isUuid(params.id)) notFound("Reference not found.");
 
       const [existing] = await db
         .select()
         .from(references)
-        .where(
-          and(eq(references.id, params.id), eq(references.userId, user.id)),
-        )
+        .where(eq(references.id, params.id))
         .limit(1);
 
       if (!existing) notFound("Reference not found.");
+      await getAccessibleProject(user.id, existing.projectId);
 
       const values = normalizeInput(body);
 
@@ -206,19 +235,26 @@ export const referenceRoutes = new Elysia()
 
       return { reference };
     },
-    { body: referenceInput },
+    {
+      body: referenceInput,
+      detail: { summary: "Update reference", tags: ["references"] },
+      response: t.Object({
+        reference: referenceSchema,
+      }),
+    },
   )
-  .delete("/references/:id", async ({ params, cookie }) => {
-    const user = await requireUser(cookie);
+  .delete("/references/:id", async ({ params, cookie, request }) => {
+    const user = await requireUser(cookie, request.headers.get("authorization"));
     if (!isUuid(params.id)) notFound("Reference not found.");
 
     const [existing] = await db
       .select()
       .from(references)
-      .where(and(eq(references.id, params.id), eq(references.userId, user.id)))
+      .where(eq(references.id, params.id))
       .limit(1);
 
     if (!existing) notFound("Reference not found.");
+    await getAccessibleProject(user.id, existing.projectId);
 
     await db.delete(references).where(eq(references.id, existing.id));
     await db
@@ -229,12 +265,18 @@ export const referenceRoutes = new Elysia()
     invalidateBibliography(existing.projectId);
 
     return { ok: true };
+  }, {
+    detail: { summary: "Delete reference", tags: ["references"] },
+    response: okSchema,
   })
   .post(
     "/references/duplicate",
-    async ({ body, cookie }) => {
-      const user = await requireUser(cookie);
-      const target = await getOwnedProject(user.id, body.projectId);
+    async ({ body, cookie, request }) => {
+      const user = await requireUser(cookie, request.headers.get("authorization"));
+      const { project: target } = await getAccessibleProject(
+        user.id,
+        body.projectId,
+      );
 
       const ids = [...new Set(body.ids)].filter(isUuid).slice(0, 200);
       if (ids.length === 0) badRequest("Select at least one reference.");
@@ -242,9 +284,13 @@ export const referenceRoutes = new Elysia()
       const rows = await db
         .select()
         .from(references)
-        .where(and(inArray(references.id, ids), eq(references.userId, user.id)));
+        .where(inArray(references.id, ids));
 
       if (rows.length === 0) notFound("No matching references.");
+
+      const allowed = await accessibleProjectIds(user.id);
+      const owned = rows.filter((row) => allowed.has(row.projectId));
+      if (owned.length === 0) notFound("No matching references.");
 
       const copies = rows.map((row) => {
         const { id, projectId, userId, createdAt, updatedAt, ...fields } = row;
@@ -270,12 +316,17 @@ export const referenceRoutes = new Elysia()
         ids: t.Array(t.String({ maxLength: 40 }), { maxItems: 200 }),
         projectId: t.String({ maxLength: 40 }),
       }),
+      detail: { summary: "Duplicate references", tags: ["references"] },
+      response: t.Object({
+        references: t.Array(referenceSchema),
+        projectId: t.String(),
+      }),
     },
   )
   .post(
     "/references/delete",
-    async ({ body, cookie }) => {
-      const user = await requireUser(cookie);
+    async ({ body, cookie, request }) => {
+      const user = await requireUser(cookie, request.headers.get("authorization"));
 
       const ids = [...new Set(body.ids)].filter(isUuid).slice(0, 200);
       if (ids.length === 0) badRequest("Select at least one reference.");
@@ -314,11 +365,18 @@ export const referenceRoutes = new Elysia()
       body: t.Object({
         ids: t.Array(t.String({ maxLength: 40 }), { maxItems: 200 }),
       }),
+      detail: { summary: "Bulk delete references", tags: ["references"] },
+      response: t.Object({
+        deleted: t.Array(t.String()),
+      }),
     },
   )
-  .get("/projects/:projectId/bibliography", async ({ params, cookie }) => {
-    const user = await requireUser(cookie);
-    const project = await getOwnedProject(user.id, params.projectId);
+  .get("/projects/:projectId/bibliography", async ({ params, cookie, request }) => {
+    const user = await requireUser(cookie, request.headers.get("authorization"));
+    const { project } = await getAccessibleProject(
+      user.id,
+      params.projectId,
+    );
 
     const rows = await db
       .select()
@@ -342,12 +400,22 @@ export const referenceRoutes = new Elysia()
       bibliography,
     );
     return bibliography;
+  }, {
+    detail: {
+      summary: "Get bibliography",
+      description: "Formatted entries plus in-text citations for a project.",
+      tags: ["references"],
+    },
+    response: bibliographySchema,
   })
   .get(
     "/projects/:projectId/export",
-    async ({ params, query, cookie, set }) => {
-      const user = await requireUser(cookie);
-      const project = await getOwnedProject(user.id, params.projectId);
+    async ({ params, query, cookie, set, request }) => {
+      const user = await requireUser(cookie, request.headers.get("authorization"));
+      const { project } = await getAccessibleProject(
+        user.id,
+        params.projectId,
+      );
 
       const rows = await db
         .select()
@@ -437,5 +505,11 @@ ${items}
       query: t.Object({
         format: t.Optional(t.String({ maxLength: 20 })),
       }),
+      detail: {
+        summary: "Export project",
+        description: "Download as text, html, ris or bibtex.",
+        tags: ["references"],
+      },
+      response: t.String(),
     },
   );

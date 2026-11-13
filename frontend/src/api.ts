@@ -1,6 +1,8 @@
 import type {
+  ApiToken,
   Bibliography,
   CslStyleSummary,
+  MintedApiToken,
   Project,
   Reference,
   ReferenceDraft,
@@ -172,6 +174,17 @@ export const api = {
       method: "POST",
       body: JSON.stringify(input),
     }),
+
+  listTokens: () => request<{ tokens: ApiToken[] }>("/auth/tokens"),
+
+  createToken: (input: { name?: string }) =>
+    request<{ token: MintedApiToken }>("/auth/tokens", {
+      method: "POST",
+      body: JSON.stringify(input),
+    }),
+
+  revokeToken: (id: string) =>
+    request<{ ok: true }>(`/auth/tokens/${id}`, { method: "DELETE" }),
 
   updateUsername: (input: { username: string }) =>
     request<{ user: User }>("/auth/username", {
