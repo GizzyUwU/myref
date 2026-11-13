@@ -13,6 +13,60 @@ export function esc(value) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;");
 }
+function isHttpUrl(value) {
+    try {
+        const parsed = new URL(value);
+        return parsed.protocol === "http:" || parsed.protocol === "https:";
+    }
+    catch {
+        return false;
+    }
+}
+function isRiskyAttrValue(value) {
+    const cleaned = value
+        .trim()
+        .replace(/^[\u0000-\u0020]+/, "")
+        .toLowerCase();
+    return (cleaned.startsWith("javascript:") ||
+        cleaned.startsWith("data:") ||
+        cleaned.startsWith("vbscript:"));
+}
+export function sanitizeCslHtml(html) {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    parsed.body
+        .querySelectorAll("script,style,iframe,object,embed,form,link,meta,base,title")
+        .forEach((node) => node.remove());
+    const nodes = parsed.body.querySelectorAll("*");
+    nodes.forEach((node) => {
+        const names = [];
+        for (let i = 0; i < node.attributes.length; i += 1) {
+            const attr = node.attributes[i];
+            if (attr)
+                names.push(attr.name);
+        }
+        for (const name of names) {
+            const lower = name.toLowerCase();
+            if (lower === "style" || lower.startsWith("on")) {
+                node.removeAttribute(name);
+                continue;
+            }
+            if ([
+                "href",
+                "src",
+                "action",
+                "xlink:href",
+                "poster",
+                "background",
+                "data",
+            ].includes(lower)) {
+                const raw = node.getAttribute(name) ?? "";
+                if (isRiskyAttrValue(raw))
+                    node.removeAttribute(name);
+            }
+        }
+    });
+    return parsed.body.innerHTML;
+}
 export function fmtPerson(person) {
     const family = (person.family || "").trim();
     const given = initials(person.given);
@@ -134,7 +188,13 @@ export function formatReference(ref) {
     }
     if (url) {
         plain += ` Available at: ${url}${accessed ? ` (Accessed: ${accessed})` : ""}.`;
-        html += ` Available at: <a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(url)}</a>${accessed ? ` (Accessed: ${esc(accessed)})` : ""}.`;
+        const linkBody = `${esc(url)}${accessed ? ` (Accessed: ${esc(accessed)})` : ""}.`;
+        if (isHttpUrl(url)) {
+            html += ` Available at: <a href="${esc(url)}" target="_blank" rel="noreferrer">${esc(url)}</a>${accessed ? ` (Accessed: ${esc(accessed)})` : ""}.`;
+        }
+        else {
+            html += ` Available at: ${linkBody}`;
+        }
     }
     else if (accessed && ref.type === "website") {
         plain += ` (Accessed: ${accessed}).`;

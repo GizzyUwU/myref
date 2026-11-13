@@ -11,7 +11,7 @@ export function LoginPage() {
     try {
       return await api.authConfig();
     } catch {
-      return { registrationEnabled: true };
+      return { registrationEnabled: false };
     }
   });
   const [username, setUsername] = createSignal("");
@@ -74,7 +74,7 @@ export function LoginPage() {
           </button>
         </form>
 
-        <Show when={config()?.registrationEnabled ?? true}>
+        <Show when={config()?.registrationEnabled === true}>
           <p class="auth-switch">
             New to MyRef? <A href="/register">Create an account</A>
           </p>

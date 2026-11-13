@@ -107,8 +107,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       if (password.length < 8) {
         badRequest("Password must be at least 8 characters.");
       }
-      if (password.length > 128) {
-        badRequest("Password must be 128 characters or fewer.");
+      if (Buffer.byteLength(password, "utf8") > 72) {
+        badRequest("Password must be 72 characters or fewer.");
       }
 
       const existing = await db
@@ -403,8 +403,8 @@ export const authRoutes = new Elysia({ prefix: "/auth" })
       if (newPassword.length < 8) {
         badRequest("New password must be at least 8 characters.");
       }
-      if (newPassword.length > 128) {
-        badRequest("New password must be 128 characters or fewer.");
+      if (Buffer.byteLength(newPassword, "utf8") > 72) {
+        badRequest("New password must be 72 characters or fewer.");
       }
 
       const valid = await verifyPassword(currentPassword, user.passwordHash);

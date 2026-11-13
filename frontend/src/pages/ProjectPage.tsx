@@ -9,6 +9,7 @@ import {
 } from "solid-js";
 import { Portal } from "solid-js/web";
 import { createVirtualizer } from "@tanstack/solid-virtual";
+import DOMPurify from "dompurify";
 import { api, ApiError, exportUrl } from "../api";
 import { AppShell } from "../components/AppShell";
 import { ReferenceDialog } from "../components/ReferenceDialog";
@@ -29,6 +30,19 @@ import {
 } from "../types";
 
 type ExportFormat = "text" | "html" | "ris" | "bibtex";
+
+const fontStacks = [
+  "Calibri, 'Calibri Light', Arial, sans-serif",
+  "Arial, sans-serif",
+  "Times New Roman, Times, serif",
+  "Georgia, serif",
+  "Cambria, serif",
+  "'Palatino Linotype', Palatino, serif",
+];
+
+function safeFont(value: string | null | undefined): string {
+  return value && fontStacks.includes(value) ? value : fontStacks[0];
+}
 
 export function ProjectPage() {
   const params = useParams();
@@ -118,21 +132,30 @@ export function ProjectPage() {
   const [fontSaving, setFontSaving] = createSignal(false);
 
   createEffect(() => {
+    try {
+      const stored = localStorage.getItem(`myref:font:${projectId()}`);
+      if (stored) {
+        setCopyFont(safeFont(stored));
+        return;
+      }
+    } catch {
+    }
     const font = projectResource()?.fontFamily;
-    if (font) setCopyFont(font);
+    if (font) setCopyFont(safeFont(font));
   });
 
   async function changeFont(value: string) {
+    const safe = safeFont(value);
     const previous = copyFont();
-    setCopyFont(value);
+    setCopyFont(safe);
     try {
-      localStorage.setItem(`myref:font:${projectId()}`, value);
+      localStorage.setItem(`myref:font:${projectId()}`, safe);
     } catch {
     }
-    if (value === projectResource()?.fontFamily) return;
+    if (safe === projectResource()?.fontFamily) return;
     setFontSaving(true);
     try {
-      await api.updateProject(projectId(), { fontFamily: value });
+      await api.updateProject(projectId(), { fontFamily: safe });
       void refetchProject();
     } catch (caught) {
       setCopyFont(previous);
@@ -486,7 +509,7 @@ export function ProjectPage() {
     const html = items
       .map(
         (entry) =>
-          `<div style="font-family: ${font.replace(/"/g, '&quot;')}; font-size: 12pt; line-height: 1.5;">${(entry.html || entry.plain).replace(/\n/g, "<br>")}</div>`,
+          `<div style="font-family: ${font.replace(/"/g, '&quot;')}; font-size: 12pt; line-height: 1.5;">${DOMPurify.sanitize(entry.html || entry.plain).replace(/\n/g, "<br>")}</div>`,
       )
       .join("<br><br>");
 
@@ -1050,7 +1073,7 @@ export function ProjectPage() {
                       </Show>
                       <For each={visibleEntries()}>
                         {(entry) => (
-                          <div class="bib-entry" innerHTML={entry.html} style={`font-family: ${copyFont()}; font-size: 12pt; line-height: 1.6;`} />
+                          <div class="bib-entry" innerHTML={DOMPurify.sanitize(entry.html)} style={`font-family: ${copyFont()}; font-size: 12pt; line-height: 1.6;`} />
                         )}
                       </For>
                     </Show>
@@ -1135,13 +1158,18 @@ export function ProjectPage() {
 
                   <p class="bib-note">
                     Rendered with citeproc-js ·{" "}
-                    <a
-                      href={bibliography()?.styleSource ?? project().styleSource}
-                      target="_blank"
-                      rel="noreferrer"
+                    <Show
+                      when={(bibliography()?.styleSource ?? project().styleSource)?.startsWith("https://")}
+                      fallback={<span>official CSL style</span>}
                     >
-                      official CSL style
-                    </a>
+                      <a
+                        href={bibliography()?.styleSource ?? project().styleSource}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        official CSL style
+                      </a>
+                    </Show>
                   </p>
                 </aside>
               </div>

@@ -2,6 +2,7 @@ node_modules
 dist
 .env*
 !.env.example
+certs/*.pem
 *.log
 *.tsbuildinfo
 .DS_Store

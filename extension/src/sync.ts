@@ -65,6 +65,23 @@ export function serverBase(serverUrl: string): string {
   return (serverUrl || "").trim().replace(/\/+$/, "");
 }
 
+function assertServerUrl(base: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(base);
+  } catch {
+    throw new Error("That server URL is not valid.");
+  }
+  const host = parsed.hostname.toLowerCase();
+  const localHost =
+    host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+  if (parsed.protocol === "https:") return;
+  if (parsed.protocol === "http:" && localHost) return;
+  throw new Error(
+    "Server URL must use https:// (http is allowed only for localhost).",
+  );
+}
+
 export async function searchServerStyles(
   base: string,
   token: string,
@@ -97,6 +114,7 @@ async function serverFetch<T>(
   options?: RequestInit,
 ): Promise<T> {
   if (!base) throw new Error("Set a server URL first.");
+  assertServerUrl(base);
   if (!token) throw new Error("Not connected — log in to get an API token.");
   const headers = new Headers(options?.headers);
   headers.set("Authorization", `Bearer ${token}`);
@@ -104,7 +122,6 @@ async function serverFetch<T>(
     headers.set("Content-Type", "application/json");
   }
   const res = await fetch(base + path, {
-    credentials: "include",
     ...(options ?? {}),
     headers,
   });
@@ -136,6 +153,7 @@ export async function mintToken(
   if (!base) throw new Error("Set a server URL first.");
   if (!username || !password) throw new Error("Enter username and password.");
   const cleanBase = serverBase(base);
+  assertServerUrl(cleanBase);
   const res = await fetch(cleanBase + "/api/auth/token", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -178,6 +196,7 @@ export async function validateToken(
 ): Promise<ValidatedToken> {
   const cleanBase = serverBase(base);
   if (!cleanBase) throw new Error("Set a server URL first.");
+  assertServerUrl(cleanBase);
   if (!token.trim()) throw new Error("Paste an API token first.");
   const data = await serverFetch<{
     user: { username: string } | null;

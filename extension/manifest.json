@@ -7,7 +7,7 @@
     "default_popup": "popup.html",
     "default_title": "MyRef"
   },
-  "permissions": ["storage", "activeTab", "tabs", "scripting"],
+  "permissions": ["storage", "activeTab", "scripting"],
   "host_permissions": ["http://*/*", "https://*/*"],
   "commands": {
     "save-tab": {

@@ -11,10 +11,10 @@ export function RegisterPage() {
     try {
       return await api.authConfig();
     } catch {
-      return { registrationEnabled: true };
+      return { registrationEnabled: false };
     }
   });
-  const registrationEnabled = () => config()?.registrationEnabled ?? true;
+  const registrationEnabled = () => config()?.registrationEnabled === true;
   const [username, setUsername] = createSignal("");
   const [password, setPassword] = createSignal("");
   const [confirm, setConfirm] = createSignal("");
@@ -58,6 +58,10 @@ export function RegisterPage() {
         title="Create your account"
         subtitle="Free referencing with thousands of citation styles."
       >
+        <Show
+          when={!config.loading}
+          fallback={<p class="form-subtle">Loading…</p>}
+        >
         <Show
           when={registrationEnabled()}
           fallback={
@@ -116,6 +120,7 @@ export function RegisterPage() {
             {busy() ? "Creating account..." : "Create account"}
           </button>
         </form>
+        </Show>
         </Show>
 
         <p class="auth-switch">

@@ -83,7 +83,7 @@ POST   /api/share/join                          { code }
 
 ## 6. Errors and limits
 
-Error shape is always `{ error: string }`. Codes: `400` validation, `401` unauthenticated,
-`404` not found (also unknown share/DOI), `409` conflict, `422` bad export/HTML,
-`429` rate limit with `Retry-After`, `502` upstream lookup failure.
-CORS allows the web `APP_ORIGIN` plus `chrome-extension://` and `moz-extension://` origins.
+Error shape is always `{ error: string }`. Codes: `400` validation (also `javascript:`/`data:`/`vbscript:`/`file:` URL and DOI schemes),
+`401` unauthenticated, `404` not found (also unknown share/DOI), `409` conflict, `413` lookup response over 2 MB,
+`422` bad export/HTML, `429` rate limit with `Retry-After`, `502` upstream lookup failure.
+CORS allows the web `APP_ORIGIN` plus configured extension origins. API docs are served in non-production only.

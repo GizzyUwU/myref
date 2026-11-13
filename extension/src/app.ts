@@ -13,6 +13,7 @@ import {
   inText,
   peopleToText,
   parsePeople,
+  sanitizeCslHtml,
   sortRefs,
   type FormattedEntry,
   type SortKey,
@@ -278,7 +279,7 @@ function paintBib(
     for (const entry of entries) {
       const div = document.createElement("div");
       div.className = "bib-entry";
-      div.innerHTML = entry.html;
+      div.innerHTML = sanitizeCslHtml(entry.html);
       body.appendChild(div);
     }
   } else {
@@ -870,7 +871,7 @@ async function exportCurrent(): Promise<void> {
   } else if (format === "bibtex") {
     download(`${base}.bib`, toBibtex(rows), "application/x-bibtex");
   } else if (format === "html") {
-    const items = entries.map((entry) => `      <li>${entry.html}</li>`).join("\n");
+    const items = entries.map((entry) => `      <li>${sanitizeCslHtml(entry.html)}</li>`).join("\n");
     download(
       `${base}.html`,
       "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\" />" +
@@ -1255,15 +1256,19 @@ document.addEventListener("DOMContentLoaded", () => {
         pushTimer = undefined;
       }
       dirty = false;
-      void revokeToken(base, token).then(async () => {
-        st.settings.token = null;
-        st.settings.tokenId = null;
-        st.settings.serverUser = null;
-        st.settings.lastSyncedAt = null;
-        await saveState(st);
-        renderSyncStatus();
-        toast("Disconnected.", "success");
-      });
+      void (async () => {
+        try {
+          await revokeToken(base, token);
+        } finally {
+          st.settings.token = null;
+          st.settings.tokenId = null;
+          st.settings.serverUser = null;
+          st.settings.lastSyncedAt = null;
+          await saveState(st);
+          renderSyncStatus();
+          toast("Disconnected.", "success");
+        }
+      })();
     });
     el("useKeyBtn").addEventListener("click", () => {
       const st = getState();

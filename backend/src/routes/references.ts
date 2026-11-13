@@ -16,6 +16,7 @@ import {
   formatBibliography,
   getCachedBibliography,
   invalidateBibliography,
+  normalizeDoi,
   setCachedBibliography,
   sortReferences,
 } from "../lib/format";
@@ -72,6 +73,21 @@ function sanitizeAuthors(input: ReferenceInput["authors"]): Author[] {
     .filter((author) => author.family.length > 0);
 }
 
+function assertSafeLink(value: string): void {
+  const scheme = value
+    .replace(/[\x00-\x20]+/g, "")
+    .match(/^([a-z][a-z0-9+.-]*):/i)?.[1]
+    ?.toLowerCase();
+  if (
+    scheme === "javascript" ||
+    scheme === "data" ||
+    scheme === "vbscript" ||
+    scheme === "file"
+  ) {
+    badRequest("That URL is not allowed.");
+  }
+}
+
 function normalizeInput(body: ReferenceInput): ReferenceValues {
   const title = clean(body.title);
   if (!title) badRequest("A title is required.");
@@ -86,6 +102,11 @@ function normalizeInput(body: ReferenceInput): ReferenceValues {
     badRequest("Accessed date must be a valid date.");
   }
 
+  const doi = normalizeDoi(clean(body.doi));
+  const url = clean(body.url);
+  assertSafeLink(doi);
+  assertSafeLink(url);
+
   return {
     type,
     title,
@@ -99,8 +120,8 @@ function normalizeInput(body: ReferenceInput): ReferenceValues {
     volume: clean(body.volume),
     issue: clean(body.issue),
     pages: clean(body.pages),
-    doi: clean(body.doi),
-    url: clean(body.url),
+    doi,
+    url,
     accessedDate,
     publicationDate: clean(body.publicationDate),
     notes: clean(body.notes),

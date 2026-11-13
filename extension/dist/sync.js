@@ -2,6 +2,22 @@ import { nowIso, referenceTypes, } from "./types.js";
 export function serverBase(serverUrl) {
     return (serverUrl || "").trim().replace(/\/+$/, "");
 }
+function assertServerUrl(base) {
+    let parsed;
+    try {
+        parsed = new URL(base);
+    }
+    catch {
+        throw new Error("That server URL is not valid.");
+    }
+    const host = parsed.hostname.toLowerCase();
+    const localHost = host === "localhost" || host === "127.0.0.1" || host === "::1" || host === "[::1]";
+    if (parsed.protocol === "https:")
+        return;
+    if (parsed.protocol === "http:" && localHost)
+        return;
+    throw new Error("Server URL must use https:// (http is allowed only for localhost).");
+}
 export async function searchServerStyles(base, token, query) {
     const data = await serverFetch(base, token, `/api/styles?q=${encodeURIComponent(query)}&limit=50`);
     return data.styles ?? [];
@@ -12,6 +28,7 @@ export async function fetchServerStyle(base, token, styleId) {
 async function serverFetch(base, token, path, options) {
     if (!base)
         throw new Error("Set a server URL first.");
+    assertServerUrl(base);
     if (!token)
         throw new Error("Not connected — log in to get an API token.");
     const headers = new Headers(options?.headers);
@@ -20,7 +37,6 @@ async function serverFetch(base, token, path, options) {
         headers.set("Content-Type", "application/json");
     }
     const res = await fetch(base + path, {
-        credentials: "include",
         ...(options ?? {}),
         headers,
     });
@@ -49,6 +65,7 @@ export async function mintToken(base, username, password) {
     if (!username || !password)
         throw new Error("Enter username and password.");
     const cleanBase = serverBase(base);
+    assertServerUrl(cleanBase);
     const res = await fetch(cleanBase + "/api/auth/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -82,6 +99,7 @@ export async function validateToken(base, token) {
     const cleanBase = serverBase(base);
     if (!cleanBase)
         throw new Error("Set a server URL first.");
+    assertServerUrl(cleanBase);
     if (!token.trim())
         throw new Error("Paste an API token first.");
     const data = await serverFetch(cleanBase, token.trim(), "/api/auth/me");

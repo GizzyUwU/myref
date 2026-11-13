@@ -18,6 +18,7 @@ export function isExtensionOrigin(
   origin: string | null | undefined,
 ): boolean {
   if (!origin) return false;
+  if (env.extensionOrigins.includes(origin)) return true;
   return extensionOriginPatterns.some((pattern) => pattern.test(origin));
 }
 

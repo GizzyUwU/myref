@@ -18,31 +18,6 @@ initSentry();
 
 const app = new Elysia()
   .use(
-    swagger({
-      path: "/api/docs",
-      scalarConfig: {
-        spec: { url: "/api/docs/json" },
-      },
-      documentation: {
-        info: {
-          title: "MyRef API",
-          version: "1.0.0",
-          description:
-            "Reference manager API. Browser extension flow: POST /api/auth/token with username+password to mint a Bearer token, then send Authorization: Bearer myref_... on every call. See /api/docs/extension for the step-by-step guide.",
-        },
-        tags: [
-          { name: "auth", description: "Login, sessions and API tokens" },
-          { name: "projects", description: "Projects owned or shared" },
-          { name: "references", description: "References, bibliography and export" },
-          { name: "sharing", description: "Share codes and members" },
-          { name: "styles", description: "CSL citation styles" },
-          { name: "lookup", description: "DOI / ISBN / URL metadata lookup" },
-          { name: "extension", description: "How the browser extension uses this API" },
-        ],
-      },
-    }),
-  )
-  .use(
     cors({
       origin: [env.appOrigin, ...extensionOriginPatterns],
       credentials: true,
@@ -100,6 +75,33 @@ const app = new Elysia()
       .use(lookupRoutes),
   );
 
+if (!env.isProduction) {
+  app.use(
+    swagger({
+      path: "/api/docs",
+      scalarConfig: {
+        spec: { url: "/api/docs/json" },
+      },
+      documentation: {
+        info: {
+          title: "MyRef API",
+          version: "1.0.0",
+          description:
+            "Reference manager API. Browser extension flow: POST /api/auth/token with username+password to mint a Bearer token, then send Authorization: Bearer myref_... on every call. See /api/docs/extension for the step-by-step guide.",
+        },
+        tags: [
+          { name: "auth", description: "Login, sessions and API tokens" },
+          { name: "projects", description: "Projects owned or shared" },
+          { name: "references", description: "References, bibliography and export" },
+          { name: "sharing", description: "Share codes and members" },
+          { name: "styles", description: "CSL citation styles" },
+          { name: "lookup", description: "DOI / ISBN / URL metadata lookup" },
+          { name: "extension", description: "How the browser extension uses this API" },
+        ],
+      },
+    }),
+  );
+
 app.get("/api/docs/extension", () => ({
     name: "Browser extension integration",
     auth: {
@@ -152,6 +154,7 @@ app.get("/api/docs/extension", () => ({
       })),
     }),
   });
+}
 
 const distDir = resolve(import.meta.dir, "../../frontend/dist");
 

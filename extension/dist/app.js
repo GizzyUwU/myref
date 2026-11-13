@@ -1,6 +1,6 @@
 import { download, toBibtex, toRis } from "./export.js";
 import { bundledStyles, defaultStyle, formatWithStyle, loadBundledStyle, } from "./csl.js";
-import { esc, formatEntries, inText, peopleToText, parsePeople, sortRefs, } from "./format.js";
+import { esc, formatEntries, inText, peopleToText, parsePeople, sanitizeCslHtml, sortRefs, } from "./format.js";
 import { doLookup, saveCurrentTab } from "./lookup.js";
 import { loadState, saveState } from "./storage.js";
 import { mintToken, pullMerge, pushAll, revokeToken, serverBase, validateToken, fetchServerStyle, searchServerStyles } from "./sync.js";
@@ -215,7 +215,7 @@ function paintBib(body, entries, showCite, useSelected) {
         for (const entry of entries) {
             const div = document.createElement("div");
             div.className = "bib-entry";
-            div.innerHTML = entry.html;
+            div.innerHTML = sanitizeCslHtml(entry.html);
             body.appendChild(div);
         }
     }
@@ -778,7 +778,7 @@ async function exportCurrent() {
         download(`${base}.bib`, toBibtex(rows), "application/x-bibtex");
     }
     else if (format === "html") {
-        const items = entries.map((entry) => `      <li>${entry.html}</li>`).join("\n");
+        const items = entries.map((entry) => `      <li>${sanitizeCslHtml(entry.html)}</li>`).join("\n");
         download(`${base}.html`, "<!doctype html>\n<html lang=\"en\">\n<head><meta charset=\"utf-8\" />" +
             `<title>${esc(project ? project.name : "References")}</title></head>\n<body>\n` +
             `<h1>${esc(project ? project.name : "References")}</h1>\n<ul>\n${items}\n</ul>\n</body>\n</html>`, "text/html");
@@ -1145,15 +1145,20 @@ document.addEventListener("DOMContentLoaded", () => {
                 pushTimer = undefined;
             }
             dirty = false;
-            void revokeToken(base, token).then(async () => {
-                st.settings.token = null;
-                st.settings.tokenId = null;
-                st.settings.serverUser = null;
-                st.settings.lastSyncedAt = null;
-                await saveState(st);
-                renderSyncStatus();
-                toast("Disconnected.", "success");
-            });
+            void (async () => {
+                try {
+                    await revokeToken(base, token);
+                }
+                finally {
+                    st.settings.token = null;
+                    st.settings.tokenId = null;
+                    st.settings.serverUser = null;
+                    st.settings.lastSyncedAt = null;
+                    await saveState(st);
+                    renderSyncStatus();
+                    toast("Disconnected.", "success");
+                }
+            })();
         });
         el("useKeyBtn").addEventListener("click", () => {
             const st = getState();

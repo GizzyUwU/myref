@@ -338,6 +338,47 @@ function lookupLimit(
   return limit.allowed ? null : { retryAfter: limit.retryAfter };
 }
 
+export async function readCappedText(
+  response: Response,
+  maxBytes = 2_000_000,
+): Promise<string> {
+  const declared = Number(response.headers.get("content-length") ?? 0);
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new HttpError(413, "That response is too large to process.");
+  }
+  if (!response.body) return response.text();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new HttpError(413, "That response is too large to process.");
+    }
+    chunks.push(value);
+  }
+  return new TextDecoder().decode(
+    chunks.reduce((merged, chunk) => {
+      const next = new Uint8Array(merged.length + chunk.length);
+      next.set(merged);
+      next.set(chunk, merged.length);
+      return next;
+    }, new Uint8Array()),
+  );
+}
+
+function parseJsonPayload<T>(text: string, source: string): T {
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new HttpError(502, `${source} returned an unreadable response.`);
+  }
+}
+
 export async function fetchUrlWithSsrfChecks(startUrl: string): Promise<Response> {
   let current = startUrl;
   for (let hop = 0; hop <= 5; hop++) {
@@ -362,6 +403,11 @@ export async function fetchUrlWithSsrfChecks(startUrl: string): Promise<Response
       redirect: "manual",
     }).catch(() => {
       throw new HttpError(502, "Could not reach that URL. Try again.");
+    });
+
+    await assertHostnameIsPublic(parsed.hostname).catch(async (error: unknown) => {
+      await response.body?.cancel().catch(() => undefined);
+      throw error;
     });
 
     if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -415,7 +461,10 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
         throw new HttpError(502, "Crossref could not look up that DOI.");
       }
 
-      const payload = (await response.json()) as CrossrefResponse;
+      const payload = parseJsonPayload<CrossrefResponse>(
+        await readCappedText(response),
+        "Crossref",
+      );
       const message = payload.message;
       if (!message) notFound("No record found for that DOI.");
 
@@ -501,7 +550,10 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
         throw new HttpError(502, "Open Library could not look up that ISBN.");
       }
 
-      const payload = (await response.json()) as OpenLibraryResponse;
+      const payload = parseJsonPayload<OpenLibraryResponse>(
+        await readCappedText(response),
+        "Open Library",
+      );
 
       const book = payload[`ISBN:${isbn}`];
       if (!book?.title) notFound("No record found for that ISBN.");
@@ -587,7 +639,7 @@ export const lookupRoutes = new Elysia({ prefix: "/lookup" })
         throw new HttpError(422, "That URL does not appear to be an HTML page.");
       }
 
-      const html = await response.text();
+      const html = await readCappedText(response);
 
       const getMeta = (name: string) => {
         const escaped = name.replace(/\./g, "\\.");

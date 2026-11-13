@@ -19,8 +19,21 @@ export const env = {
   isProduction: (process.env.NODE_ENV ?? "development") === "production",
   tlsCertPath: process.env.TLS_CERT_PATH ?? "",
   tlsKeyPath: process.env.TLS_KEY_PATH ?? "",
-  trustProxy: parseEnabled(process.env.TRUST_PROXY, false),
+  trustProxy: ["true", "1", "yes", "on", "enabled"].includes(
+    (process.env.TRUST_PROXY ?? "").trim().toLowerCase(),
+  ),
   sessionDays: 30,
-  registrationEnabled: parseEnabled(process.env.REGISTRATION_ENABLED, true),
+  registrationEnabled: registrationEnabled(),
+  extensionOrigins: (process.env.EXTENSION_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter(Boolean),
   sentryDsn: process.env.SENTRY_DSN ?? "",
 };
+
+function registrationEnabled(): boolean {
+  const configured = (process.env.REGISTRATION_ENABLED ?? "").trim();
+  if (!configured)
+    return (process.env.NODE_ENV ?? "development") !== "production";
+  return parseEnabled(configured, true);
+}

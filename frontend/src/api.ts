@@ -77,7 +77,7 @@ export const api = {
   projects: () => request<{ projects: Project[] }>("/projects"),
 
   project: (id: string) =>
-    request<{ project: Project }>(`/projects/${id}`),
+    request<{ project: Project }>(`/projects/${encodeURIComponent(id)}`),
 
   createProject: (input: { name: string; description?: string }) =>
     request<{ project: Project }>("/projects", {
@@ -94,7 +94,7 @@ export const api = {
       fontFamily?: string;
     },
   ) =>
-    request<{ project: Project }>(`/projects/${id}`, {
+    request<{ project: Project }>(`/projects/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(input),
     }),
@@ -105,16 +105,16 @@ export const api = {
     ),
 
   deleteProject: (id: string) =>
-    request<{ ok: true }>(`/projects/${id}`, { method: "DELETE" }),
+    request<{ ok: true }>(`/projects/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   references: (projectId: string) =>
     request<{ references: Reference[] }>(
-      `/projects/${projectId}/references`,
+      `/projects/${encodeURIComponent(projectId)}/references`,
     ),
 
   createReference: (projectId: string, draft: ReferenceDraft) =>
     request<{ reference: Reference }>(
-      `/projects/${projectId}/references`,
+      `/projects/${encodeURIComponent(projectId)}/references`,
       {
         method: "POST",
         body: JSON.stringify(draft),
@@ -122,13 +122,13 @@ export const api = {
     ),
 
   updateReference: (id: string, draft: ReferenceDraft) =>
-    request<{ reference: Reference }>(`/references/${id}`, {
+    request<{ reference: Reference }>(`/references/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: JSON.stringify(draft),
     }),
 
   deleteReference: (id: string) =>
-    request<{ ok: true }>(`/references/${id}`, { method: "DELETE" }),
+    request<{ ok: true }>(`/references/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   duplicateReferences: (input: { ids: string[]; projectId: string }) =>
     request<{ references: Reference[]; projectId: string }>(
@@ -146,7 +146,7 @@ export const api = {
     }),
 
   bibliography: (projectId: string) =>
-    request<Bibliography>(`/projects/${projectId}/bibliography`),
+    request<Bibliography>(`/projects/${encodeURIComponent(projectId)}/bibliography`),
 
   lookupDoi: (doi: string) =>
     request<{ source: string; reference: ReferenceDraft }>(
@@ -184,7 +184,7 @@ export const api = {
     }),
 
   revokeToken: (id: string) =>
-    request<{ ok: true }>(`/auth/tokens/${id}`, { method: "DELETE" }),
+    request<{ ok: true }>(`/auth/tokens/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   updateUsername: (input: { username: string }) =>
     request<{ user: User }>("/auth/username", {
@@ -200,5 +200,5 @@ export function exportUrl(
   projectId: string,
   format: "text" | "html" | "ris" | "bibtex",
 ): string {
-  return `/api/projects/${projectId}/export?format=${format}`;
+  return `/api/projects/${encodeURIComponent(projectId)}/export?format=${format}`;
 }

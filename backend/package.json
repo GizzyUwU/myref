@@ -14,25 +14,25 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@elysiajs/cors": "latest",
-    "@elysiajs/static": "latest",
+    "@elysiajs/cors": "1.4.3",
+    "@elysiajs/static": "1.4.12",
     "@elysiajs/swagger": "^1.3.1",
     "@sentry/bun": "^11.10.0",
     "citeproc": "^2.4.63",
-    "dotenv": "latest",
-    "drizzle-orm": "latest",
-    "elysia": "latest",
+    "dotenv": "18.0.10",
+    "drizzle-orm": "0.45.4",
+    "elysia": "1.4.32",
     "he": "^2.0.0",
-    "postgres": "latest",
+    "postgres": "4.1.1",
     "sanitize-filename": "^1.6.4",
     "uuid": "^14.0.3"
   },
   "devDependencies": {
-    "@types/bun": "latest",
+    "@types/bun": "1.4.4",
     "@types/he": "^1.2.3",
     "@types/sanitize-filename": "^1.6.3",
     "@types/uuid": "^11.0.0",
-    "drizzle-kit": "latest",
-    "typescript": "latest"
+    "drizzle-kit": "0.31.11",
+    "typescript": "7.0.2"
   }
 }

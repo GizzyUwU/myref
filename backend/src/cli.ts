@@ -8,7 +8,7 @@ function usage(): never {
   bun src/cli.ts list-users
   bun src/cli.ts reset-password <username> <new-password>
 
-  reset-password sets a new password (8-128 characters) and revokes
+  reset-password sets a new password (8-72 characters) and revokes
   all existing sessions for the account.`);
   process.exit(1);
 }
@@ -34,8 +34,8 @@ async function resetPassword(
     console.error("New password must be at least 8 characters.");
     process.exit(1);
   }
-  if (newPassword.length > 128) {
-    console.error("New password must be 128 characters or fewer.");
+  if (Buffer.byteLength(newPassword, "utf8") > 72) {
+    console.error("New password must be 72 characters or fewer.");
     process.exit(1);
   }
 
