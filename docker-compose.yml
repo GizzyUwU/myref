@@ -1,47 +1,31 @@
 services:
-  db:
-    image: postgres:17.11-alpine
-    container_name: myref-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-myref}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment or .env file}
-      POSTGRES_DB: ${POSTGRES_DB:-myref}
-    volumes:
-      - myref_pgdata:/var/lib/postgresql/data
-    ports:
-      - "${POSTGRES_PORT:-55432}:5432"
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-myref} -d ${POSTGRES_DB:-myref}",
-        ]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
     container_name: myref-backend
-    restart: unless-stopped
+    restart: always
     ports:
-      - "${PORT:-443}:3000"
+      - "${PORT:-443}:${APP_PORT:-3000}"
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-myref}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the environment or .env file}@db:5432/${POSTGRES_DB:-myref}
+      DATABASE_URL: ${DATABASE_URL:-}
       NODE_ENV: production
-      # Direct TLS termination (self-signed localhost certs in ./certs are a
-      # dev placeholder — mount real certs in production).
-      TLS_CERT_PATH: /certs/cert.pem
-      TLS_KEY_PATH: /certs/key.pem
-      # Reverse-proxy alternative: terminate TLS at the proxy instead, then
-      # replace the TLS_* lines above with TRUST_PROXY: "true", stop
-      # publishing this service's ports publicly, and let the proxy forward
+      # Internal listen port, set via APP_PORT on the host (default 3000).
+      # The backend reads PORT, so host APP_PORT is mapped to container PORT.
+      # ${PORT} is the host-side (external) port, left of the colon above.
+      PORT: ${APP_PORT:-3000}
+      # Direct TLS termination. Defaults serve ./certs (a localhost-only
+      # placeholder — mount real certs in production). Use `-` (not `:-`)
+      # so setting them empty explicitly disables direct TLS (e.g. with
+      # TRUST_PROXY=true behind a TLS-terminating reverse proxy).
+      TLS_CERT_PATH: ${TLS_CERT_PATH-/certs/cert.pem}
+      TLS_KEY_PATH: ${TLS_KEY_PATH-/certs/key.pem}
+      # Reverse-proxy alternative: set TRUST_PROXY=true and TLS_CERT_PATH /
+      # TLS_KEY_PATH empty in .env to terminate TLS at the proxy instead, then
+      # stop publishing this service's ports publicly, and let the proxy forward
       # to http://backend:3000 (set APP_ORIGIN to the public https:// origin).
       # When TRUST_PROXY=true, also unpublish ports below and firewall the db.
-      # TRUST_PROXY: "true"
+      TRUST_PROXY: ${TRUST_PROXY:-}
       # Exact browser-extension origins allowed for cross-site API access
       # (comma-separated, e.g. chrome-extension://abcdefghijklmnopqrstuvwxyz).
       # Unset keeps the permissive built-in pattern (fine for dev).
@@ -49,22 +33,21 @@ services:
       # New accounts: on by default in dev, off by default in production.
       # Empty means unset (backend default applies).
       REGISTRATION_ENABLED: ${REGISTRATION_ENABLED:-}
-      PORT: "3000"
       # Optional Sentry DSN for server-error reporting (tracing stays off).
       # Leave unset for zero overhead / nothing leaving the machine.
       # SENTRY_DSN: ${SENTRY_DSN:-}
       APP_ORIGIN: ${APP_ORIGIN:-https://localhost:${PORT:-443}}
     volumes:
-      - ./certs:/certs:ro
-    depends_on:
-      db:
-        condition: service_healthy
+      # Host dir mounted at /certs (read-only). Override with HOST_CERTS_DIR
+      # when real certs live elsewhere. Not needed behind a TLS-terminating
+      # reverse proxy (TRUST_PROXY=true with TLS_* empty): remove this mount.
+      - "${HOST_CERTS_DIR:-./certs}:/certs:ro"
     healthcheck:
-      test: ["CMD", "bun", "-e", "fetch('https://localhost:3000/api/health', { tls: { rejectUnauthorized: false } }).then((r) => { if (!r.ok) process.exit(1) })"]
+      # Runs inside the container, so it must use the container's PORT and
+      # protocol, not the host's ${PORT}. $$ escapes Compose interpolation:
+      # the shell inside the container expands $PORT / $TLS_* at runtime.
+      test: ["CMD-SHELL", "if [ -n \"$$TLS_CERT_PATH\" ] && [ -n \"$$TLS_KEY_PATH\" ]; then bun -e \"fetch('https://localhost:$${PORT:-3000}/api/health',{tls:{rejectUnauthorized:false}}).then((r)=>{if(!r.ok)process.exit(1)})\"; else bun -e \"fetch('http://localhost:$${PORT:-3000}/api/health').then((r)=>{if(!r.ok)process.exit(1)})\"; fi"]
       interval: 10s
       timeout: 5s
       retries: 12
       start_period: 20s
-
-volumes:
-  myref_pgdata:
