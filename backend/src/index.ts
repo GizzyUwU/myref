@@ -198,7 +198,31 @@ if (existsSync(join(distDir, "index.html"))) {
   });
 }
 
-const useTls = Boolean(env.tlsCertPath && env.tlsKeyPath);
+const certConfigured = Boolean(env.tlsCertPath || env.tlsKeyPath);
+const certExists = env.tlsCertPath ? existsSync(env.tlsCertPath) : false;
+const keyExists = env.tlsKeyPath ? existsSync(env.tlsKeyPath) : false;
+const useTls = Boolean(env.tlsCertPath && env.tlsKeyPath) && certExists && keyExists;
+
+if (certConfigured && !useTls) {
+  const missing = [
+    !certExists ? `cert not found: ${env.tlsCertPath || "(unset)"}` : null,
+    !keyExists ? `key not found: ${env.tlsKeyPath || "(unset)"}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+  if (env.trustProxy) {
+    console.warn(
+      `TLS paths configured but files missing (${missing}); ` +
+        `TRUST_PROXY=true, falling back to plain HTTP behind the proxy. ` +
+        `To terminate TLS directly, mount valid certs. To silence this, set TLS_CERT_PATH= and TLS_KEY_PATH= empty.`,
+    );
+  } else {
+    throw new Error(
+      `TLS misconfigured (${missing}): set both TLS_CERT_PATH and TLS_KEY_PATH ` +
+        `to valid files, or set TRUST_PROXY=true with both empty when behind a TLS-terminating reverse proxy.`,
+    );
+  }
+}
 
 if (env.isProduction && !useTls && !env.trustProxy) {
   throw new Error(
