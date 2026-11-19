@@ -26,7 +26,9 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     container_name: myref-backend
-    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: always
     ports:
       - "${PORT:-443}:${APP_PORT:-3000}"
     environment:
